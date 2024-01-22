@@ -3,6 +3,11 @@ module gitee.com/mogud/snow/host
 go 1.21
 
 require (
+	gitee.com/mogud/snow/core v0.0.0-00010101000000-000000000000
+	gitee.com/mogud/snow/injection v0.0.0-00010101000000-000000000000
+)
+
+require (
 	github.com/knadh/koanf/maps v0.1.1 // indirect
 	github.com/knadh/koanf/parsers/json v0.1.0 // indirect
 	github.com/knadh/koanf/providers/rawbytes v0.1.0 // indirect
@@ -13,4 +18,9 @@ require (
 	github.com/panjf2000/ants/v2 v2.9.0 // indirect
 	github.com/tidwall/btree v1.7.0 // indirect
 	github.com/trapcodeio/go-strip-json-comments v1.0.11 // indirect
+)
+
+replace (
+	gitee.com/mogud/snow/core => ../core
+	gitee.com/mogud/snow/injection => ../injection
 )
