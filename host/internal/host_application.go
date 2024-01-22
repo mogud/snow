@@ -2,7 +2,7 @@ package internal
 
 import (
 	"context"
-	"snow/host"
+	"gitee.com/mogud/snow/host"
 )
 
 var _ host.IHostApplication = (*HostApplication)(nil)

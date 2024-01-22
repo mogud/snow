@@ -1,8 +1,8 @@
 package host
 
 import (
+	"gitee.com/mogud/snow/injection"
 	"reflect"
-	"snow/injection"
 )
 
 type IHost interface {

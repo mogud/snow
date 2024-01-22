@@ -1,7 +1,7 @@
 package internal
 
 import (
-	"snow/host"
+	"gitee.com/mogud/snow/host"
 )
 
 var _ host.IHostedLifecycleRoutineContainer = (*HostedLifecycleRoutineContainer)(nil)

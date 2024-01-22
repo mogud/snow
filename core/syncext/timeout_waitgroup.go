@@ -1,7 +1,7 @@
 package syncext
 
 import (
-	"snow/core/meta"
+	"gitee.com/mogud/snow/core/meta"
 	"sync/atomic"
 	"time"
 )

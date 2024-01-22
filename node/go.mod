@@ -1,4 +1,4 @@
-module snow/node
+module gitee.com/mogud/snow/node
 
 go 1.21
 

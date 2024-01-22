@@ -1,11 +1,11 @@
 package host
 
 import (
+	"gitee.com/mogud/snow/core/logging"
+	"gitee.com/mogud/snow/core/logging/handler"
+	"gitee.com/mogud/snow/core/option"
+	"gitee.com/mogud/snow/injection"
 	"reflect"
-	"snow/core/logging"
-	"snow/core/logging/handler"
-	"snow/core/option"
-	"snow/injection"
 )
 
 var optionContainerType = reflect.TypeOf((*option.IOptionInjector)(nil)).Elem()

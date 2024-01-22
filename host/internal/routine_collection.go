@@ -1,8 +1,8 @@
 package internal
 
 import (
+	"gitee.com/mogud/snow/injection"
 	"reflect"
-	"snow/injection"
 	"sync"
 )
 

@@ -1,8 +1,8 @@
 package slog
 
 import (
-	"snow/core/logging"
-	"snow/core/logging/handler"
+	"gitee.com/mogud/snow/core/logging"
+	"gitee.com/mogud/snow/core/logging/handler"
 	"sync/atomic"
 )
 

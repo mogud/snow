@@ -1,9 +1,9 @@
 package internal
 
 import (
+	"gitee.com/mogud/snow/host"
+	"gitee.com/mogud/snow/injection"
 	"reflect"
-	"snow/host"
-	"snow/injection"
 	"sync/atomic"
 )
 

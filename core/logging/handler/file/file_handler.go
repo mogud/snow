@@ -2,11 +2,11 @@ package file
 
 import (
 	"fmt"
+	"gitee.com/mogud/snow/core/logging"
+	"gitee.com/mogud/snow/core/option"
 	"os"
 	"path"
 	"runtime"
-	"snow/core/logging"
-	"snow/core/option"
 	"sort"
 	"strings"
 	"sync"

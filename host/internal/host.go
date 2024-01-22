@@ -3,11 +3,11 @@ package internal
 import (
 	"context"
 	"fmt"
-	"snow/core/logging"
-	"snow/core/option"
-	"snow/core/syncext"
-	"snow/host"
-	"snow/injection"
+	"gitee.com/mogud/snow/core/logging"
+	"gitee.com/mogud/snow/core/option"
+	"gitee.com/mogud/snow/core/syncext"
+	"gitee.com/mogud/snow/host"
+	"gitee.com/mogud/snow/injection"
 	"time"
 	"unsafe"
 )

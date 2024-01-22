@@ -2,9 +2,9 @@ package snow
 
 import (
 	"container/heap"
-	"snow/node"
-	"snow/core/debug"
-	"snow/core/logging/slog"
+	"gitee.com/mogud/snow/core/debug"
+	"gitee.com/mogud/snow/core/logging/slog"
+	"gitee.com/mogud/snow/node"
 	"time"
 )
 

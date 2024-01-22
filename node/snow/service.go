@@ -2,13 +2,13 @@ package snow
 
 import (
 	"fmt"
+	"gitee.com/mogud/snow/core/debug"
+	"gitee.com/mogud/snow/core/logging"
+	"gitee.com/mogud/snow/core/task"
+	"gitee.com/mogud/snow/core/ticker"
+	"gitee.com/mogud/snow/node"
 	"math/rand"
 	"reflect"
-	"snow/node"
-	"snow/core/debug"
-	"snow/core/logging"
-	"snow/core/task"
-	"snow/core/ticker"
 	"sync"
 	"sync/atomic"
 	"time"

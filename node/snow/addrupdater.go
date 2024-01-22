@@ -1,7 +1,7 @@
 package snow
 
 import (
-	"snow/core/task"
+	"gitee.com/mogud/snow/core/task"
 	"sync/atomic"
 )
 

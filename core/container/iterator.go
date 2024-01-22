@@ -1,7 +1,7 @@
 package container
 
 import (
-	"snow/core/stdext/constraints"
+	"gitee.com/mogud/snow/core/stdext/constraints"
 )
 
 type Iterator[T any] interface {

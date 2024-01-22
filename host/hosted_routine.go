@@ -2,7 +2,7 @@ package host
 
 import (
 	"context"
-	"snow/core/syncext"
+	"gitee.com/mogud/snow/core/syncext"
 )
 
 type IHostedRoutine interface {

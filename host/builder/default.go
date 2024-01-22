@@ -1,15 +1,15 @@
 package builder
 
 import (
-	"snow/core/logging"
-	"snow/core/logging/handler"
-	"snow/core/logging/handler/console"
-	"snow/core/logging/handler/file"
-	"snow/core/logging/slog"
-	"snow/core/option"
-	"snow/host"
-	"snow/host/internal"
-	"snow/injection"
+	"gitee.com/mogud/snow/core/logging"
+	"gitee.com/mogud/snow/core/logging/handler"
+	"gitee.com/mogud/snow/core/logging/handler/console"
+	"gitee.com/mogud/snow/core/logging/handler/file"
+	"gitee.com/mogud/snow/core/logging/slog"
+	"gitee.com/mogud/snow/core/option"
+	"gitee.com/mogud/snow/host"
+	"gitee.com/mogud/snow/host/internal"
+	"gitee.com/mogud/snow/injection"
 )
 
 var _ host.IBuilder = (*DefaultBuilder)(nil)

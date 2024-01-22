@@ -1,4 +1,4 @@
-module snow/core
+module gitee.com/mogud/snow/core
 
 go 1.21
 

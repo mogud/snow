@@ -1,7 +1,7 @@
 package snow
 
 import (
-	"snow/node"
+	"gitee.com/mogud/snow/node"
 )
 
 var _ = (node.IRpcContext)((*rpcContext)(nil))

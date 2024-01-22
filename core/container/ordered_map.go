@@ -1,8 +1,8 @@
 package container
 
 import (
+	"gitee.com/mogud/snow/core/stdext/constraints"
 	"github.com/tidwall/btree"
-	"snow/core/stdext/constraints"
 )
 
 var _ = Iterator[Pair[int, int]]((*OrderedMap[int, int])(nil))

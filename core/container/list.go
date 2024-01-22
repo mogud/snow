@@ -1,8 +1,8 @@
 package container
 
 import (
+	"gitee.com/mogud/snow/core/stdext/constraints"
 	"math/rand"
-	"snow/core/stdext/constraints"
 )
 
 var _ = Iterator[struct{}]((List[struct{}])(nil))

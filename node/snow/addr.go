@@ -2,8 +2,8 @@ package snow
 
 import (
 	"fmt"
+	"gitee.com/mogud/snow/node"
 	"net"
-	"snow/node"
 	"strconv"
 )
 

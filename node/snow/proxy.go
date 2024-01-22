@@ -2,9 +2,9 @@ package snow
 
 import (
 	"fmt"
+	"gitee.com/mogud/snow/node"
 	"reflect"
 	"runtime/debug"
-	"snow/node"
 	"time"
 )
 

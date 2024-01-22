@@ -2,7 +2,7 @@ package snow
 
 import (
 	"container/heap"
-	"snow/node"
+	"gitee.com/mogud/snow/node"
 	"time"
 )
 
