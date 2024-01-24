@@ -1,7 +1,7 @@
 go 1.21
 
 use (
-	"./snow"
+	"./core"
 	"./routines/node"
 	"./routines/http"
 )

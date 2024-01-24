@@ -2,8 +2,8 @@ package node
 
 import (
 	"container/heap"
-	"gitee.com/mogud/snow/debug"
-	"gitee.com/mogud/snow/logging/slog"
+	"gitee.com/mogud/snow/core/debug"
+	"gitee.com/mogud/snow/core/logging/slog"
 	"time"
 )
 

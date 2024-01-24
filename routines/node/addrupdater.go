@@ -1,7 +1,7 @@
 package node
 
 import (
-	"gitee.com/mogud/snow/task"
+	"gitee.com/mogud/snow/core/task"
 	"sync/atomic"
 )
 
