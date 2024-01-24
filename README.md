@@ -8,11 +8,13 @@ snow 是 go 语言服务器应用的通用解决方案，游戏服务器是 snow
 
 ### 模块简介
 
-- `container` 常用泛型容器及容器通用算法
-- `core` 其他核心基础库
-- `injection` 依赖注入的接口
-- `host` 依赖注入的 host 框架实现，用于标准化应用启停流程，类似 .net 的 hosting
-- `node` 基于 host 框架的 actor 框架
+- `snow` snow 提供的核心基础库
+- `snow/container` 泛型容器及相应通用算法
+- `snow/host` 基于依赖注入的应用流程框架
+
+- `routines` 基于 host 框架的所有 routine 根目录
+- `routines/http` http routine
+- `routines/node` 基于 host 框架的 actor 框架
 
 ### 使用说明
 * TODO example

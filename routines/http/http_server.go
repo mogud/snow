@@ -3,13 +3,13 @@ package http
 import (
 	"context"
 	"fmt"
-	"gitee.com/mogud/snow/core/container"
-	"gitee.com/mogud/snow/core/logging"
-	"gitee.com/mogud/snow/core/logging/slog"
-	"gitee.com/mogud/snow/core/option"
-	"gitee.com/mogud/snow/core/sync"
-	"gitee.com/mogud/snow/core/task"
+	"gitee.com/mogud/snow/container"
 	"gitee.com/mogud/snow/host"
+	"gitee.com/mogud/snow/logging"
+	"gitee.com/mogud/snow/logging/slog"
+	"gitee.com/mogud/snow/option"
+	"gitee.com/mogud/snow/sync"
+	"gitee.com/mogud/snow/task"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -131,11 +131,13 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		Handler:           ss.srvMux,
 	}
 
+	wg.Add(2)
 	task.Execute(func() {
 		slog.Infof("http server listen at %s", listener.Addr())
 		if err := srv.Serve(listener); err != nil {
 			slog.Errorf("ListenAndServe: %+v", err)
 		}
+		wg.Done()
 	})
 
 	ss.HandleFunc("/", ss.notFound)
@@ -159,6 +161,8 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		}
 		ss.queue.Deq()()
 	}
+
+	wg.Done()
 }
 
 func (ss *Server) SafeHandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {

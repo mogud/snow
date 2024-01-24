@@ -1,9 +1,7 @@
 go 1.21
 
 use (
-	"./host"
-	"./core"
-	"./injection"
-	"./node"
+	"./snow"
+	"./routines/node"
 	"./routines/http"
 )
