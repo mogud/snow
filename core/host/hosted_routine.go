@@ -20,13 +20,9 @@ type IHostedRoutineContainer interface {
 func AddHostedRoutine[U IHostedRoutine](builder IBuilder) {
 	provider := builder.GetRoutineProvider()
 	container := GetRoutine[IHostedRoutineContainer](provider)
-	s := NewStruct[U]()
-	AddSingletonFactory[U](builder, func(scope injection.IRoutineScope) U {
-		return s
-	})
 
+	AddSingleton[U](builder)
 	container.AddHostedRoutine(func() IHostedRoutine {
-		Inject(provider.GetRootScope(), s)
-		return s
+		return injection.GetRoutine[U](provider)
 	})
 }
