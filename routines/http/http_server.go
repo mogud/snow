@@ -131,13 +131,11 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		Handler:           ss.srvMux,
 	}
 
-	wg.Add(2)
 	task.Execute(func() {
 		slog.Infof("http server listen at %s", listener.Addr())
 		if err := srv.Serve(listener); err != nil {
 			slog.Errorf("ListenAndServe: %+v", err)
 		}
-		wg.Done()
 	})
 
 	ss.HandleFunc("/", ss.notFound)
@@ -161,8 +159,6 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		}
 		ss.queue.Deq()()
 	}
-
-	wg.Done()
 }
 
 func (ss *Server) SafeHandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
