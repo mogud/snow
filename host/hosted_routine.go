@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"gitee.com/mogud/snow/core/sync"
+	"gitee.com/mogud/snow/injection"
 )
 
 type IHostedRoutine interface {
@@ -19,9 +20,12 @@ type IHostedRoutineContainer interface {
 func AddHostedRoutine[U IHostedRoutine](builder IBuilder) {
 	provider := builder.GetRoutineProvider()
 	container := GetRoutine[IHostedRoutineContainer](provider)
+	s := NewStruct[U]()
+	AddSingletonFactory[U](builder, func(scope injection.IRoutineScope) U {
+		return s
+	})
 
 	container.AddHostedRoutine(func() IHostedRoutine {
-		s := NewStruct[U]()
 		Inject(provider.GetRootScope(), s)
 		return s
 	})

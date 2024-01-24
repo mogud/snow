@@ -34,6 +34,7 @@ type Option struct {
 	MinPort          int      `koanf:"MinPort"`
 	MaxPort          int      `koanf:"MaxPort"`
 	KeepAliveSeconds int      `koanf:"KeepAliveSeconds"`
+	TimeoutSeconds   int      `koanf:"TimeoutSeconds"`
 	WhiteList        []string `koanf:"WhiteList"`
 	Debug            bool     `koanf:"Debug"`
 }
@@ -67,11 +68,10 @@ func (ss *Server) OnReady(callback func()) {
 
 	if atomic.LoadInt32(&ss.started) == 1 {
 		for {
-			cb := ss.queue.Deq()
-			if cb == nil {
+			if ss.queue.Empty() {
 				break
 			}
-			cb()
+			ss.queue.Deq()()
 		}
 	}
 }
@@ -93,6 +93,9 @@ func (ss *Server) Construct(opt *option.Option[*Option], logger *logging.Logger[
 	}
 	if ss.opt.KeepAliveSeconds == 0 {
 		ss.opt.KeepAliveSeconds = 60
+	}
+	if ss.opt.TimeoutSeconds == 0 {
+		ss.opt.TimeoutSeconds = 5
 	}
 
 	ss.ctx, ss.cancel = context.WithCancel(context.Background())
@@ -120,9 +123,17 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		return
 	}
 
+	srv := &http.Server{
+		IdleTimeout:       time.Duration(ss.opt.KeepAliveSeconds) * time.Second,
+		ReadTimeout:       time.Duration(ss.opt.TimeoutSeconds) * time.Second,
+		WriteTimeout:      time.Duration(ss.opt.TimeoutSeconds) * time.Second,
+		ReadHeaderTimeout: time.Duration(ss.opt.TimeoutSeconds) * time.Second,
+		Handler:           ss.srvMux,
+	}
+
 	task.Execute(func() {
 		slog.Infof("http server listen at %s", listener.Addr())
-		if err := http.Serve(listener, ss.srvMux); err != nil {
+		if err := srv.Serve(listener); err != nil {
 			slog.Errorf("ListenAndServe: %+v", err)
 		}
 	})
@@ -143,11 +154,10 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	atomic.StoreInt32(&ss.started, 1)
 
 	for {
-		cb := ss.queue.Deq()
-		if cb == nil {
+		if ss.queue.Empty() {
 			break
 		}
-		cb()
+		ss.queue.Deq()()
 	}
 }
 
