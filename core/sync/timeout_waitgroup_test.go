@@ -1,7 +1,7 @@
-package syncext_test
+package sync_test
 
 import (
-	"gitee.com/mogud/snow/core/syncext"
+	"gitee.com/mogud/snow/core/sync"
 	"github.com/stretchr/testify/assert"
 	"sync/atomic"
 	"testing"
@@ -10,7 +10,7 @@ import (
 
 func TestWait(t *testing.T) {
 	a := atomic.Int32{}
-	wg := syncext.NewTimeoutWaitGroup()
+	wg := sync.NewTimeoutWaitGroup()
 	wg.Add(1)
 	go func() {
 		a.Store(5)
@@ -22,7 +22,7 @@ func TestWait(t *testing.T) {
 
 func TestWaitTimeout(t *testing.T) {
 	a := atomic.Int32{}
-	wg1 := syncext.NewTimeoutWaitGroup()
+	wg1 := sync.NewTimeoutWaitGroup()
 	wg1.Add(1)
 	go func() {
 		time.Sleep(5 * time.Millisecond)
@@ -32,7 +32,7 @@ func TestWaitTimeout(t *testing.T) {
 	assert.False(t, wg1.WaitTimeout(time.Millisecond))
 	assert.NotEqual(t, int32(5), a.Load())
 
-	wg2 := syncext.NewTimeoutWaitGroup()
+	wg2 := sync.NewTimeoutWaitGroup()
 	wg2.Add(1)
 	go func() {
 		time.Sleep(5 * time.Millisecond)

@@ -1,7 +1,7 @@
 package math
 
 import (
-	"gitee.com/mogud/snow/core/stdext/constraints"
+	"gitee.com/mogud/snow/core/constraints"
 )
 
 func Clamp[T constraints.Ordered](v T, minV T, maxV T) T {

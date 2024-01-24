@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"gitee.com/mogud/snow/core/logging"
 	"gitee.com/mogud/snow/core/option"
-	"gitee.com/mogud/snow/core/syncext"
+	"gitee.com/mogud/snow/core/sync"
 	"gitee.com/mogud/snow/host"
 	"gitee.com/mogud/snow/injection"
 	"time"
@@ -49,7 +49,7 @@ func (ss *Host) Construct(option *option.Option[*HostOption], logger *logging.Lo
 	})
 }
 
-func (ss *Host) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
+func (ss *Host) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	wg.Add(1)
 	defer wg.Done()
 
@@ -77,7 +77,7 @@ func (ss *Host) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	}()
 
 	if len(ss.hostedLifecycleRoutines) > 0 {
-		routineWg := syncext.NewTimeoutWaitGroup()
+		routineWg := sync.NewTimeoutWaitGroup()
 		routineWg.Add(len(ss.hostedLifecycleRoutines))
 		for _, routine := range ss.hostedLifecycleRoutines {
 			routine := routine
@@ -92,7 +92,7 @@ func (ss *Host) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	}
 
 	if len(ss.hostedLifecycleRoutines) > 0 || len(ss.hostedRoutines) > 0 {
-		routineWg := syncext.NewTimeoutWaitGroup()
+		routineWg := sync.NewTimeoutWaitGroup()
 		if len(ss.hostedLifecycleRoutines) > 0 {
 			routineWg.Add(len(ss.hostedLifecycleRoutines))
 			for _, routine := range ss.hostedLifecycleRoutines {
@@ -119,7 +119,7 @@ func (ss *Host) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	}
 
 	if len(ss.hostedLifecycleRoutines) > 0 {
-		routineWg := syncext.NewTimeoutWaitGroup()
+		routineWg := sync.NewTimeoutWaitGroup()
 		routineWg.Add(len(ss.hostedLifecycleRoutines))
 		for _, routine := range ss.hostedLifecycleRoutines {
 			routine := routine
@@ -139,12 +139,12 @@ func (ss *Host) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	}
 }
 
-func (ss *Host) Stop(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
+func (ss *Host) Stop(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	wg.Add(1)
 	defer wg.Done()
 
 	if len(ss.hostedLifecycleRoutines) > 0 {
-		routineWg := syncext.NewTimeoutWaitGroup()
+		routineWg := sync.NewTimeoutWaitGroup()
 		routineWg.Add(len(ss.hostedLifecycleRoutines))
 		for _, routine := range ss.hostedLifecycleRoutines {
 			routine := routine
@@ -159,7 +159,7 @@ func (ss *Host) Stop(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	}
 
 	if len(ss.hostedLifecycleRoutines) > 0 || len(ss.hostedRoutines) > 0 {
-		routineWg := syncext.NewTimeoutWaitGroup()
+		routineWg := sync.NewTimeoutWaitGroup()
 		if len(ss.hostedLifecycleRoutines) > 0 {
 			routineWg.Add(len(ss.hostedLifecycleRoutines))
 			for _, routine := range ss.hostedLifecycleRoutines {
@@ -186,7 +186,7 @@ func (ss *Host) Stop(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	}
 
 	if len(ss.hostedLifecycleRoutines) > 0 {
-		routineWg := syncext.NewTimeoutWaitGroup()
+		routineWg := sync.NewTimeoutWaitGroup()
 		routineWg.Add(len(ss.hostedLifecycleRoutines))
 		for _, routine := range ss.hostedLifecycleRoutines {
 			routine := routine

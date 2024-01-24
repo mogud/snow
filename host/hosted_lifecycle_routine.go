@@ -2,16 +2,16 @@ package host
 
 import (
 	"context"
-	"gitee.com/mogud/snow/core/syncext"
+	"gitee.com/mogud/snow/core/sync"
 )
 
 type IHostedLifecycleRoutine interface {
 	IHostedRoutine
 
-	BeforeStart(ctx context.Context, wg *syncext.TimeoutWaitGroup)
-	AfterStart(ctx context.Context, wg *syncext.TimeoutWaitGroup)
-	BeforeStop(ctx context.Context, wg *syncext.TimeoutWaitGroup)
-	AfterStop(ctx context.Context, wg *syncext.TimeoutWaitGroup)
+	BeforeStart(ctx context.Context, wg *sync.TimeoutWaitGroup)
+	AfterStart(ctx context.Context, wg *sync.TimeoutWaitGroup)
+	BeforeStop(ctx context.Context, wg *sync.TimeoutWaitGroup)
+	AfterStop(ctx context.Context, wg *sync.TimeoutWaitGroup)
 }
 
 type IHostedLifecycleRoutineContainer interface {

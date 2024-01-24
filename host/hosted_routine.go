@@ -2,12 +2,12 @@ package host
 
 import (
 	"context"
-	"gitee.com/mogud/snow/core/syncext"
+	"gitee.com/mogud/snow/core/sync"
 )
 
 type IHostedRoutine interface {
-	Start(ctx context.Context, wg *syncext.TimeoutWaitGroup)
-	Stop(ctx context.Context, wg *syncext.TimeoutWaitGroup)
+	Start(ctx context.Context, wg *sync.TimeoutWaitGroup)
+	Stop(ctx context.Context, wg *sync.TimeoutWaitGroup)
 }
 
 type IHostedRoutineContainer interface {

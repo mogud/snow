@@ -1,4 +1,4 @@
-package syncext
+package sync
 
 import (
 	"gitee.com/mogud/snow/core/meta"

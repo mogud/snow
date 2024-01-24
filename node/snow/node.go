@@ -8,7 +8,7 @@ import (
 	"gitee.com/mogud/snow/core/logging/slog"
 	net2 "gitee.com/mogud/snow/core/net"
 	"gitee.com/mogud/snow/core/option"
-	"gitee.com/mogud/snow/core/syncext"
+	sync2 "gitee.com/mogud/snow/core/sync"
 	"gitee.com/mogud/snow/core/task"
 	"gitee.com/mogud/snow/host"
 	"gitee.com/mogud/snow/injection"
@@ -146,7 +146,7 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nbOpt *
 	gNode = ss
 }
 
-func (ss *Node) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
+func (ss *Node) Start(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	InitOptions(ss.nodeBootOpt)
 
 	sn := "Metrics"
@@ -187,7 +187,7 @@ func (ss *Node) Start(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
 	go ss.nodeStartListen()
 }
 
-func (ss *Node) Stop(ctx context.Context, wg *syncext.TimeoutWaitGroup) {
+func (ss *Node) Stop(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	wg.Add(1)
 	ss.cancel()
 

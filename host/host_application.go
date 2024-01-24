@@ -2,7 +2,7 @@ package host
 
 import (
 	"context"
-	"gitee.com/mogud/snow/core/syncext"
+	"gitee.com/mogud/snow/core/sync"
 )
 
 type IHostApplication interface {
@@ -20,13 +20,13 @@ func Run(h IHost) {
 		cancel()
 	})
 
-	wg := syncext.NewTimeoutWaitGroup()
+	wg := sync.NewTimeoutWaitGroup()
 	h.Start(context.Background(), wg)
 	wg.Wait()
 
 	<-ctx.Done()
 
-	wg = syncext.NewTimeoutWaitGroup()
+	wg = sync.NewTimeoutWaitGroup()
 	h.Stop(context.Background(), wg)
 	wg.Wait()
 }

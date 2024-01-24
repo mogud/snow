@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gitee.com/mogud/snow/core/logging"
-	"gitee.com/mogud/snow/core/syncext"
+	sync2 "gitee.com/mogud/snow/core/sync"
 	"gitee.com/mogud/snow/host"
 	"os"
 	"os/signal"
@@ -31,7 +31,7 @@ func (ss *ConsoleLifetimeRoutine) Construct(application host.IHostApplication, l
 	})
 }
 
-func (ss *ConsoleLifetimeRoutine) Start(_ context.Context, wg *syncext.TimeoutWaitGroup) {
+func (ss *ConsoleLifetimeRoutine) Start(_ context.Context, wg *sync2.TimeoutWaitGroup) {
 	ss.ctx, ss.cancel = context.WithCancel(context.Background())
 	ss.wg = &sync.WaitGroup{}
 	ss.wg.Add(1)
@@ -54,7 +54,7 @@ func (ss *ConsoleLifetimeRoutine) Start(_ context.Context, wg *syncext.TimeoutWa
 	}()
 }
 
-func (ss *ConsoleLifetimeRoutine) Stop(_ context.Context, wg *syncext.TimeoutWaitGroup) {
+func (ss *ConsoleLifetimeRoutine) Stop(_ context.Context, wg *sync2.TimeoutWaitGroup) {
 	wg.Add(1)
 	defer wg.Done()
 
