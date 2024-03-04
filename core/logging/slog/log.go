@@ -2,59 +2,31 @@ package slog
 
 import (
 	"gitee.com/mogud/snow/core/logging"
-	"gitee.com/mogud/snow/core/logging/handler"
 	"sync/atomic"
 )
 
-var globalHandler logging.ILogHandler
-var globalLogger logging.ILogger
-var lock int32
+var globalLogger atomic.Pointer[logging.ILogger]
+
+func init() {
+	logger := logging.ILogger(logging.NewDefaultLogger("Global", logging.NewSimpleLogHandler(), nil))
+	globalLogger.Store(&logger)
+}
 
 func BindGlobalHandler(h logging.ILogHandler) {
-	for {
-		if !atomic.CompareAndSwapInt32(&lock, 0, 1) {
-			continue
-		}
-
-		globalHandler = h
-
-		atomic.StoreInt32(&lock, 0)
-		break
-	}
+	logger := logging.ILogger(logging.NewDefaultLogger("Global", h, nil))
+	globalLogger.Store(&logger)
 }
 
 func BindGlobalLogger(l logging.ILogger) {
-	for {
-		if !atomic.CompareAndSwapInt32(&lock, 0, 1) {
-			continue
-		}
-
-		globalLogger = l
-
-		atomic.StoreInt32(&lock, 0)
-		break
+	if l == nil {
+		panic("bind global logger with nil")
 	}
+
+	globalLogger.Store(&l)
 }
 
 func getLogger() logging.ILogger {
-	var logger logging.ILogger
-	for {
-		if !atomic.CompareAndSwapInt32(&lock, 0, 1) {
-			continue
-		}
-
-		if globalHandler == nil {
-			globalHandler = handler.NewCompoundHandler()
-		}
-		if globalLogger == nil {
-			globalLogger = logging.NewDefaultLogger("Global", globalHandler, nil)
-		}
-		logger = globalLogger
-
-		atomic.StoreInt32(&lock, 0)
-		break
-	}
-	return logger
+	return *globalLogger.Load()
 }
 
 func Tracef(format string, args ...any) {

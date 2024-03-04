@@ -1,6 +1,9 @@
 package logging
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type LogData struct {
 	Time    time.Time
@@ -16,4 +19,15 @@ type LogData struct {
 
 type ILogHandler interface {
 	Log(data *LogData)
+}
+
+func NewSimpleLogHandler() ILogHandler {
+	return simpleLogHandler{}
+}
+
+type simpleLogHandler struct {
+}
+
+func (s simpleLogHandler) Log(data *LogData) {
+	fmt.Println(DefaultLogFormatter(data))
 }
