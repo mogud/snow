@@ -41,7 +41,7 @@ func NewDefaultBuilder() *DefaultBuilder {
 	host.AddSingletonFactory[*console.Handler](builder, func(scope injection.IRoutineScope) *console.Handler {
 		return console.NewHandler()
 	})
-	host.AddOption[*console.Option](builder, "Log.File")
+	host.AddOption[*file.Option](builder, "Log.File")
 	host.AddSingletonFactory[*file.Handler](builder, func(scope injection.IRoutineScope) *file.Handler {
 		return file.NewHandler()
 	})
