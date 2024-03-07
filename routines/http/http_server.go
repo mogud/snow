@@ -23,20 +23,26 @@ import (
 )
 
 type IHttpServer interface {
-	SafeHandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
 	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
 	GetPort() int
 	OnReady(cb func())
 }
 
+type RouteOption struct {
+	Path           string `koanf:"Path"`
+	Method         string `koanf:"Method"`
+	CheckWhiteList bool   `koanf:"CheckWhiteList"`
+}
+
 type Option struct {
-	Host             string   `koanf:"Host"`
-	MinPort          int      `koanf:"MinPort"`
-	MaxPort          int      `koanf:"MaxPort"`
-	KeepAliveSeconds int      `koanf:"KeepAliveSeconds"`
-	TimeoutSeconds   int      `koanf:"TimeoutSeconds"`
-	WhiteList        []string `koanf:"WhiteList"`
-	Debug            bool     `koanf:"Debug"`
+	Host             string         `koanf:"Host"`
+	MinPort          int            `koanf:"MinPort"`
+	MaxPort          int            `koanf:"MaxPort"`
+	KeepAliveSeconds int            `koanf:"KeepAliveSeconds"`
+	TimeoutSeconds   int            `koanf:"TimeoutSeconds"`
+	WhiteList        []string       `koanf:"WhiteList"`
+	Routes           []*RouteOption `koanf:"Routes"`
+	Debug            bool           `koanf:"Debug"`
 }
 
 var _ IHttpServer = (*Server)(nil)
@@ -141,14 +147,14 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	ss.HandleFunc("/", ss.notFound)
 
 	if ss.opt.Debug {
-		ss.SafeHandleFunc("/debug/pprof/", pprof.Index)
-		ss.SafeHandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		ss.SafeHandleFunc("/debug/pprof/profile", pprof.Profile)
-		ss.SafeHandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		ss.SafeHandleFunc("/debug/pprof/trace", pprof.Trace)
-		ss.SafeHandleFunc("/debug/pprof/trace_start", ss.traceStart)
-		ss.SafeHandleFunc("/debug/pprof/trace_stop", ss.traceStop)
-		ss.SafeHandleFunc("/gc", ss.gc)
+		ss.HandleFunc("/debug/pprof/", pprof.Index)
+		ss.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		ss.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		ss.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		ss.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		ss.HandleFunc("/debug/pprof/trace_start", ss.traceStart)
+		ss.HandleFunc("/debug/pprof/trace_stop", ss.traceStop)
+		ss.HandleFunc("/gc", ss.gc)
 	}
 
 	atomic.StoreInt32(&ss.started, 1)
@@ -161,24 +167,40 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	}
 }
 
-func (ss *Server) SafeHandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	ss.srvMux.HandleFunc(pattern, func(w http.ResponseWriter, req *http.Request) {
-		ipaddr, _ := net.ResolveTCPAddr("tcp", req.RemoteAddr)
-		ip := ipaddr.IP.String()
+		checkWhiteList := false
+		method := http.MethodPost
 
-		if !ss.isInWhiteList(ip) {
+		for _, s := range ss.opt.Routes {
+			if s.Path == pattern {
+				checkWhiteList = s.CheckWhiteList
+				method = s.Method
+				break
+			}
+		}
+
+		if method != req.Method {
 			if ss.opt.Debug {
-				slog.Warnf("SafeHandleFunc: http request remote(%v) not in whitelist", req.RemoteAddr)
+				slog.Warnf("HandleFunc: invalid method type '%v' from remote(%v)", req.Method, req.RemoteAddr)
 			}
 			return
 		}
 
+		if checkWhiteList {
+			ipaddr, _ := net.ResolveTCPAddr("tcp", req.RemoteAddr)
+			ip := ipaddr.IP.String()
+
+			if !ss.isInWhiteList(ip) {
+				if ss.opt.Debug {
+					slog.Warnf("HandleFunc: http request remote(%v) not in whitelist", req.RemoteAddr)
+				}
+				return
+			}
+		}
+
 		handler(w, req)
 	})
-}
-
-func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	ss.srvMux.HandleFunc(pattern, handler)
 }
 
 func (ss *Server) Stop(ctx context.Context, wg *sync.TimeoutWaitGroup) {
