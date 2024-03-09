@@ -28,21 +28,15 @@ type IHttpServer interface {
 	OnReady(cb func())
 }
 
-type RouteOption struct {
-	Path           string `koanf:"Path"`
-	Method         string `koanf:"Method"`
-	CheckWhiteList bool   `koanf:"CheckWhiteList"`
-}
-
 type Option struct {
-	Host             string         `koanf:"Host"`
-	MinPort          int            `koanf:"MinPort"`
-	MaxPort          int            `koanf:"MaxPort"`
-	KeepAliveSeconds int            `koanf:"KeepAliveSeconds"`
-	TimeoutSeconds   int            `koanf:"TimeoutSeconds"`
-	WhiteList        []string       `koanf:"WhiteList"`
-	Routes           []*RouteOption `koanf:"Routes"`
-	Debug            bool           `koanf:"Debug"`
+	Host             string   `koanf:"Host"`
+	MinPort          int      `koanf:"MinPort"`
+	MaxPort          int      `koanf:"MaxPort"`
+	KeepAliveSeconds int      `koanf:"KeepAliveSeconds"`
+	TimeoutSeconds   int      `koanf:"TimeoutSeconds"`
+	WhiteList        []string `koanf:"WhiteList"`
+	UncheckedPath    []string `koanf:"UncheckedPath"`
+	Debug            bool     `koanf:"Debug"`
 }
 
 var _ IHttpServer = (*Server)(nil)
@@ -167,15 +161,12 @@ func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	}
 }
 
-func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+func (ss *Server) HandleFuncMethod(pattern string, method string, handler func(http.ResponseWriter, *http.Request)) {
 	ss.srvMux.HandleFunc(pattern, func(w http.ResponseWriter, req *http.Request) {
-		checkWhiteList := false
-		method := http.MethodPost
-
-		for _, s := range ss.opt.Routes {
-			if s.Path == pattern {
-				checkWhiteList = s.CheckWhiteList
-				method = s.Method
+		checkWhiteList := true
+		for _, s := range ss.opt.UncheckedPath {
+			if s == pattern {
+				checkWhiteList = false
 				break
 			}
 		}
@@ -193,7 +184,7 @@ func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *
 
 			if !ss.isInWhiteList(ip) {
 				if ss.opt.Debug {
-					slog.Warnf("HandleFunc: http request remote(%v) not in whitelist", req.RemoteAddr)
+					slog.Warnf("HandleFunc: http request remote(%v) not in white list", req.RemoteAddr)
 				}
 				return
 			}
@@ -201,6 +192,10 @@ func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *
 
 		handler(w, req)
 	})
+}
+
+func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	ss.HandleFuncMethod(pattern, "", handler)
 }
 
 func (ss *Server) Stop(ctx context.Context, wg *sync.TimeoutWaitGroup) {
