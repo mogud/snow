@@ -195,7 +195,7 @@ func (ss *Server) HandleFuncMethod(pattern string, method string, handler func(h
 }
 
 func (ss *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	ss.HandleFuncMethod(pattern, "", handler)
+	ss.HandleFuncMethod(pattern, http.MethodPost, handler)
 }
 
 func (ss *Server) Stop(ctx context.Context, wg *sync.TimeoutWaitGroup) {
