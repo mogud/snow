@@ -1,8 +1,8 @@
 package internal
 
 import (
-	"gitee.com/mogud/snow/core/host"
-	"gitee.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/host"
+	"github.com/mogud/snow/core/injection"
 	"reflect"
 	"sync/atomic"
 )

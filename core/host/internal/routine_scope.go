@@ -1,7 +1,7 @@
 package internal
 
 import (
-	"gitee.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/injection"
 	"reflect"
 	"sync"
 )

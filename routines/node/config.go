@@ -1,7 +1,7 @@
 package node
 
 import (
-	"gitee.com/mogud/snow/core/logging/slog"
+	"github.com/mogud/snow/core/logging/slog"
 	"net"
 	"sort"
 )

@@ -1,7 +1,7 @@
 package sync
 
 import (
-	"gitee.com/mogud/snow/core/meta"
+	"github.com/mogud/snow/core/meta"
 	"sync/atomic"
 	"time"
 )

@@ -1,9 +1,9 @@
-module gitee.com/mogud/snow/routines/node
+module github.com/mogud/snow/routines/node
 
 go 1.21
 
 require (
-	gitee.com/mogud/snow/core v0.0.0-00010101000000-000000000000
+	github.com/mogud/snow/core v0.0.0-00010101000000-000000000000
 	github.com/json-iterator/go v1.1.12
 )
 
@@ -22,4 +22,4 @@ require (
 	github.com/trapcodeio/go-strip-json-comments v1.0.11 // indirect
 )
 
-replace gitee.com/mogud/snow/core => ./../../core
+replace github.com/mogud/snow/core => ./../../core

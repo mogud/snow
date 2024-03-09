@@ -1,8 +1,8 @@
-module gitee.com/mogud/snow/routines/http
+module github.com/mogud/snow/routines/http
 
 go 1.21
 
-require gitee.com/mogud/snow/core v0.0.0-00010101000000-000000000000
+require github.com/mogud/snow/core v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/knadh/koanf/maps v0.1.1 // indirect
@@ -17,4 +17,4 @@ require (
 	github.com/trapcodeio/go-strip-json-comments v1.0.11 // indirect
 )
 
-replace gitee.com/mogud/snow/core => ../../core
+replace github.com/mogud/snow/core => ../../core

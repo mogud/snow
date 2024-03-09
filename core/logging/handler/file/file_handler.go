@@ -2,8 +2,8 @@ package file
 
 import (
 	"fmt"
-	"gitee.com/mogud/snow/core/logging"
-	"gitee.com/mogud/snow/core/option"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/option"
 	"os"
 	"path"
 	"runtime"

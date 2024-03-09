@@ -1,10 +1,10 @@
 package host
 
 import (
-	"gitee.com/mogud/snow/core/injection"
-	"gitee.com/mogud/snow/core/logging"
-	"gitee.com/mogud/snow/core/logging/handler"
-	"gitee.com/mogud/snow/core/option"
+	"github.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/logging/handler"
+	"github.com/mogud/snow/core/option"
 	"reflect"
 )
 

@@ -2,7 +2,7 @@ package file
 
 import (
 	"fmt"
-	"gitee.com/mogud/snow/core/task"
+	"github.com/mogud/snow/core/task"
 	"os"
 	"path"
 )

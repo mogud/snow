@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"gitee.com/mogud/snow/core/container"
-	"gitee.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/container"
+	"github.com/mogud/snow/core/logging"
 	"reflect"
 	"unsafe"
 )

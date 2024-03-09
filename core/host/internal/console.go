@@ -3,9 +3,9 @@ package internal
 import (
 	"context"
 	"fmt"
-	"gitee.com/mogud/snow/core/host"
-	"gitee.com/mogud/snow/core/logging"
-	sync2 "gitee.com/mogud/snow/core/sync"
+	"github.com/mogud/snow/core/host"
+	"github.com/mogud/snow/core/logging"
+	sync2 "github.com/mogud/snow/core/sync"
 	"os"
 	"os/signal"
 	"sync"

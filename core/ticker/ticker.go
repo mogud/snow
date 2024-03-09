@@ -1,7 +1,7 @@
 package ticker
 
 import (
-	"gitee.com/mogud/snow/core/task"
+	"github.com/mogud/snow/core/task"
 	"sync"
 	"time"
 )

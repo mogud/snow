@@ -1,4 +1,4 @@
-module gitee.com/mogud/snow/core
+module github.com/mogud/snow/core
 
 go 1.21
 

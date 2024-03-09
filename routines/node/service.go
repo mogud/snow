@@ -2,10 +2,10 @@ package node
 
 import (
 	"fmt"
-	"gitee.com/mogud/snow/core/debug"
-	"gitee.com/mogud/snow/core/logging"
-	"gitee.com/mogud/snow/core/task"
-	"gitee.com/mogud/snow/core/ticker"
+	"github.com/mogud/snow/core/debug"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/task"
+	"github.com/mogud/snow/core/ticker"
 	"math/rand"
 	"reflect"
 	"sync"
