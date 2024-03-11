@@ -13,11 +13,12 @@ import (
 var _ logging.ILogHandler = (*Handler)(nil)
 
 type Option struct {
-	Formatter    string                   `koanf:"Formatter"`
-	WithFileLine bool                     `koanf:"WithFileLine"`
-	FileLineSkip int                      `koanf:"FileLineSkip"`
-	ErrorLevel   logging.Level            `koanf:"ErrorLevel"`
-	Filter       map[string]logging.Level `koanf:"Filter"`
+	Formatter       string                   `koanf:"Formatter"`
+	WithFileLine    bool                     `koanf:"WithFileLine"`
+	FileLineSkip    int                      `koanf:"FileLineSkip"`
+	ErrorLevel      logging.Level            `koanf:"ErrorLevel"`
+	Filter          map[string]logging.Level `koanf:"Filter"`
+	DefaultLogLevel logging.Level            `koanf:"DefaultLogLevel"`
 }
 
 type Handler struct {
@@ -54,6 +55,9 @@ func (ss *Handler) Construct(option *option.Option[*Option], repo *logging.LogFo
 	if ss.formatter == nil {
 		ss.formatter = logging.ColorLogFormatter
 	}
+	if ss.option.DefaultLogLevel == logging.NONE {
+		ss.option.DefaultLogLevel = logging.INFO
+	}
 }
 
 func (ss *Handler) Log(logData *logging.LogData) {
@@ -61,7 +65,7 @@ func (ss *Handler) Log(logData *logging.LogData) {
 		return
 	}
 
-	filterLevel := logging.NONE
+	filterLevel := ss.option.DefaultLogLevel
 	for _, key := range ss.sortedFilterKeys {
 		if strings.HasPrefix(logData.Path, key) {
 			filterLevel = ss.option.Filter[key]
