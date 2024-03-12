@@ -22,6 +22,7 @@ type Option struct {
 	WithFileLine     bool                     `koanf:"WithFileLine"`
 	FileLineSkip     int                      `koanf:"FileLineSkip"`
 	Filter           map[string]logging.Level `koanf:"Filter"`
+	DefaultLevel     logging.Level            `koanf:"DefaultLevel"`
 }
 
 type Handler struct {
@@ -80,6 +81,9 @@ func (ss *Handler) Construct(option *option.Option[*Option], repo *logging.LogFo
 	if len(ss.option.LogPath) == 0 {
 		ss.option.LogPath = "logs"
 	}
+	if ss.option.DefaultLevel == logging.NONE {
+		ss.option.DefaultLevel = logging.INFO
+	}
 }
 
 func (ss *Handler) Log(logData *logging.LogData) {
@@ -87,7 +91,7 @@ func (ss *Handler) Log(logData *logging.LogData) {
 		return
 	}
 
-	filterLevel := logging.NONE
+	filterLevel := ss.option.DefaultLevel
 	for _, key := range ss.sortedFilterKeys {
 		if strings.HasPrefix(logData.Path, key) {
 			filterLevel = ss.option.Filter[key]
