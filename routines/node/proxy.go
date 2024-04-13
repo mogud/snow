@@ -129,11 +129,12 @@ func newServiceProxy(srv *Service, updater *NodeAddrUpdater, naddr NodeAddr, sad
 		if NodeConfig.CurNodeMap[name] {
 			naddr = 0
 		} else {
+		loop:
 			for _, ni := range NodeConfig.Nodes {
 				for _, n := range ni.Services {
 					if n == name {
 						naddr = ni.NodeAddr
-						break
+						break loop
 					}
 				}
 			}

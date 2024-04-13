@@ -51,7 +51,7 @@ type Server struct {
 	started int32
 
 	srvMux *http.ServeMux
-	queue  container.ThreadSafeQueue[func()]
+	queue  *container.ThreadSafeQueue[func()]
 }
 
 func (ss *Server) GetPort() int {
@@ -101,6 +101,7 @@ func (ss *Server) Construct(opt *option.Option[*Option], logger *logging.Logger[
 	ss.ctx, ss.cancel = context.WithCancel(context.Background())
 
 	ss.srvMux = http.NewServeMux()
+	ss.queue = container.NewThreadSafeQueue[func()]()
 }
 
 func (ss *Server) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {

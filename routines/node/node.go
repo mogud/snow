@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mogud/snow/core/container"
 	"github.com/mogud/snow/core/host"
 	"github.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/kvs"
 	"github.com/mogud/snow/core/logging"
 	"github.com/mogud/snow/core/logging/slog"
 	net2 "github.com/mogud/snow/core/net"
@@ -112,6 +114,34 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nbOpt *
 	})
 
 	ss.nodeBootOpt = nbOpt.Get()
+
+	if v, ok := kvs.Get[string]("NODE_TO_START"); ok && len(v) > 0 {
+		ss.nodeBootOpt.BootName = v
+	}
+
+	if v, ok := kvs.Get[string]("NODE_LISTEN_HOST"); ok && len(v) > 0 {
+		for name, nc := range ss.nodeBootOpt.Nodes {
+			if name == ss.nodeBootOpt.BootName {
+				nc.Host = v
+			}
+		}
+	}
+
+	if v, ok := kvs.Get[int]("NODE_LISTEN_PORT"); ok {
+		for name, nc := range ss.nodeBootOpt.Nodes {
+			if name == ss.nodeBootOpt.BootName {
+				nc.Port = v
+			}
+		}
+	}
+
+	for name, nc := range ss.nodeBootOpt.Nodes {
+		if name == ss.nodeBootOpt.BootName {
+			ss.logger.Infof("node name: %v, host: %v, port: %v", ss.nodeBootOpt.BootName, nc.Host, nc.Port)
+			break
+		}
+	}
+
 	srvInfos := opt.ServiceRegisterInfos
 	for _, info := range srvInfos {
 		kind, srv, name := info.Kind, info.Type, info.Name
@@ -149,36 +179,23 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nbOpt *
 func (ss *Node) Start(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	InitOptions(ss.nodeBootOpt)
 
-	sn := "Metrics"
-	if NodeConfig.CurNodeMap[sn] {
-		saddr, err := NewService(sn)
-		if err != nil {
-			ss.logger.Fatalf("create service(%s) error: %+v", sn, err)
-		}
-
-		if !StartService(saddr, nil) {
-			ss.logger.Fatalf("start service(%s:%#8x) failed", sn, saddr)
-		}
-	}
-
-	var saddrs []int32
+	var services []*container.Pair[string, int32]
 	for _, sn := range NodeConfig.CurNode {
-		if sn == "Metrics" {
-			continue
-		}
-
 		saddr, err := NewService(sn)
 		if err != nil {
 			ss.logger.Fatalf("create service(%s) error: %+v", sn, err)
 		}
 		ss.name2Addr[sn] = saddr
-		saddrs = append(saddrs, saddr)
+		services = append(services, &container.Pair[string, int32]{
+			First:  sn,
+			Second: saddr,
+		})
 	}
 
 	go func() {
-		for _, saddr := range saddrs {
-			a := saddr
-			if !StartService(a, nil) {
+		for _, service := range services {
+			sn, saddr := service.First, service.Second
+			if !StartService(saddr, nil) {
 				ss.logger.Fatalf("start service(%s:%#8x) failed", sn, saddr)
 			}
 		}

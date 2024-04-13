@@ -9,6 +9,7 @@ import (
 type nodeElementOption struct {
 	Host     string   `koanf:"host"`     // 节点地址
 	Port     int      `koanf:"port"`     // 节点端口
+	Order    int      `koanf:"order"`    // 节点排序
 	Services []string `koanf:"services"` // 具名服务
 }
 
@@ -18,6 +19,8 @@ type NodeBootOption struct {
 }
 
 type nodeInfo struct {
+	Name     string
+	Order    int
 	NodeAddr NodeAddr
 	Services []string
 }
@@ -48,6 +51,8 @@ func InitOptions(opt *NodeBootOption) {
 		}
 
 		cfg := &nodeInfo{
+			Name:     name,
+			Order:    nc.Order,
 			NodeAddr: naddr,
 		}
 		for _, s := range nc.Services {
@@ -68,7 +73,7 @@ func InitOptions(opt *NodeBootOption) {
 		}
 	}
 	sort.Slice(NodeConfig.Nodes, func(i, j int) bool {
-		return NodeConfig.Nodes[i].NodeAddr < NodeConfig.Nodes[j].NodeAddr
+		return NodeConfig.Nodes[i].Order < NodeConfig.Nodes[j].Order
 	})
 
 	addr := NodeConfig.CurNodeAddr.String()

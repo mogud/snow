@@ -146,12 +146,10 @@ func (ss *Service) start(arg interface{}) {
 						}
 					}
 
-					if len(ss.funcChan) == 0 {
-						for f := ss.funcQueue.deq(); f != nil; f = ss.funcQueue.deq() {
-							// TODO
-							// ss.metric.Call("RecordTimer", f.Tag, int64(1), int64(100), int64(5)).Done()
-							ss.doFunc(f)
-						}
+					for f := ss.funcQueue.deq(); f != nil; f = ss.funcQueue.deq() {
+						// TODO
+						// ss.metric.Call("RecordTimer", f.Tag, int64(1), int64(100), int64(5)).Done()
+						ss.doFunc(f)
 					}
 				}
 

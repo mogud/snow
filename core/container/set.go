@@ -86,6 +86,14 @@ func (set Set[T]) Substract(iter Iterator[T]) {
 	})
 }
 
+func (set Set[T]) SubstractBy(f func(T) bool) {
+	for key := range set {
+		if f(key) {
+			delete(set, key)
+		}
+	}
+}
+
 func (set Set[T]) Unioned(iter Iterator[T]) Set[T] {
 	var result = Set[T]{}
 	for key := range set {
@@ -113,6 +121,16 @@ func (set Set[T]) Substracted(iter Iterator[T]) Set[T] {
 	rhs := SetOf(iter)
 	for key := range set {
 		if _, ok := rhs[key]; !ok {
+			result.Add(key)
+		}
+	}
+	return result
+}
+
+func (set Set[T]) SubstractedBy(pred func(T) bool) Set[T] {
+	var result = Set[T]{}
+	for key := range set {
+		if !pred(key) {
 			result.Add(key)
 		}
 	}
