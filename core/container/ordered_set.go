@@ -176,3 +176,11 @@ func (m *OrderedSet[T]) WithKeyRange(keyLow T, keyHigh T, fn func(key T)) (cnt i
 func (m *OrderedSet[T]) GetAt(key int) (value T, err bool) {
 	return m.base.GetAt(key)
 }
+
+func (m *OrderedSet[T]) First() (T, bool) {
+	return m.base.PopMin()
+}
+
+func (m *OrderedSet[T]) Last() (T, bool) {
+	return m.base.PopMax()
+}

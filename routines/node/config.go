@@ -38,14 +38,8 @@ var NodeConfig = &NodeConfigStruct{
 }
 
 func InitOptions(opt *NodeBootOption) {
-	records := make(map[NodeAddr]bool)
 	for name, nc := range opt.Nodes {
 		naddr, err := NewNodeAddr(nc.Host, nc.Port)
-		if _, ok := records[naddr]; ok && naddr != 0 {
-			slog.Fatalf("node(%s) address already exist", name)
-		}
-		records[naddr] = true
-
 		if err != nil {
 			slog.Fatalf("invalid node(%s) address: %+v", name, err)
 		}

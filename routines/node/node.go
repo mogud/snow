@@ -146,8 +146,8 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nbOpt *
 	for _, info := range srvInfos {
 		kind, srv, name := info.Kind, info.Type, info.Name
 
-		// TODO 检查 kind name 是否重复
-		// TODO 检查类型是否有效
+		// TODO by mogu: 检查 kind name 是否重复
+		// TODO by mogu: 检查类型是否有效
 
 		ss.kind2Info[kind] = info
 		ss.name2Info[name] = info
