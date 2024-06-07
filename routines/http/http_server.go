@@ -29,14 +29,14 @@ type IHttpServer interface {
 }
 
 type Option struct {
-	Host             string   `koanf:"Host"`
-	MinPort          int      `koanf:"MinPort"`
-	MaxPort          int      `koanf:"MaxPort"`
-	KeepAliveSeconds int      `koanf:"KeepAliveSeconds"`
-	TimeoutSeconds   int      `koanf:"TimeoutSeconds"`
-	WhiteList        []string `koanf:"WhiteList"`
-	UncheckedPath    []string `koanf:"UncheckedPath"`
-	Debug            bool     `koanf:"Debug"`
+	Host             string   `snow:"Host"`
+	MinPort          int      `snow:"MinPort"`
+	MaxPort          int      `snow:"MaxPort"`
+	KeepAliveSeconds int      `snow:"KeepAliveSeconds"`
+	TimeoutSeconds   int      `snow:"TimeoutSeconds"`
+	WhiteList        []string `snow:"WhiteList"`
+	UncheckedPath    []string `snow:"UncheckedPath"`
+	Debug            bool     `snow:"Debug"`
 }
 
 var _ IHttpServer = (*Server)(nil)

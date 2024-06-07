@@ -1,72 +1,89 @@
 package option
 
 import (
+	"github.com/mogud/snow/core/configuration"
 	"reflect"
 	"unsafe"
 )
 
-type Repository struct {
-	// key : type : option path
-	binding map[string]map[reflect.Type]string
-	// key : type : option value
-	values map[string]map[reflect.Type]any
+type repositoryBinding struct {
+	path  string
+	value any
 }
 
-func NewOptionRepository() *Repository {
+type Repository struct {
+	// key: type: binding
+	mapping map[string]map[reflect.Type]*repositoryBinding
+	config  configuration.IConfiguration
+}
+
+func NewOptionRepository(config configuration.IConfiguration) *Repository {
 	return &Repository{
-		binding: make(map[string]map[reflect.Type]string),
-		values:  make(map[string]map[reflect.Type]any),
+		mapping: make(map[string]map[reflect.Type]*repositoryBinding),
+		config:  config,
 	}
 }
 
 func (ss *Repository) BindByPath(key string, ty reflect.Type, path string) {
-	kv, ok := ss.binding[key]
+	kv, ok := ss.mapping[key]
 	if !ok {
-		kv = make(map[reflect.Type]string)
-		ss.binding[key] = kv
+		kv = make(map[reflect.Type]*repositoryBinding)
+		ss.mapping[key] = kv
 	}
-	kv[ty] = path
+	kv[ty] = &repositoryBinding{path: path}
 }
 
 func (ss *Repository) BindByValue(key string, ty reflect.Type, value any) {
-	kv, ok := ss.values[key]
+	kv, ok := ss.mapping[key]
 	if !ok {
-		kv = make(map[reflect.Type]any)
-		ss.values[key] = kv
+		kv = make(map[reflect.Type]*repositoryBinding)
+		ss.mapping[key] = kv
 	}
-	kv[ty] = value
+	kv[ty] = &repositoryBinding{value: value}
 }
 
-func (ss *Repository) GetOption(ty reflect.Type) any {
-	factoryTy := ty.Elem().Field(0).Type
-	instanceValue := reflect.New(ty.Elem())
+func (ss *Repository) GetOptionWrapper(ty reflect.Type) any {
+	wrapperTy := ty.Elem()
 
-	field := reflect.NewAt(factoryTy, unsafe.Pointer(instanceValue.Elem().Field(0).UnsafeAddr())).Elem()
-	field.Set(reflect.ValueOf(func(key string) any {
-		optTy := ty.Elem().Field(1).Type
+	factoryTy := wrapperTy.Field(0).Type
+	registerCallBackTy := wrapperTy.Field(1).Type
+	optTy := wrapperTy.Field(2).Type
+	instanceValue := reflect.New(wrapperTy)
 
+	factoryField := reflect.NewAt(factoryTy, unsafe.Pointer(instanceValue.Elem().Field(0).UnsafeAddr())).Elem()
+	factoryField.Set(reflect.ValueOf(func(key string) any {
 		var optValue reflect.Value
-		var ok bool
-		var vkv map[reflect.Type]any
-		if vkv, ok = ss.values[key]; ok {
-			var v any
-			if v, ok = vkv[optTy]; ok {
-				optValue = reflect.ValueOf(v)
-			}
-		}
 
+		var ok bool
+		var tkv map[reflect.Type]*repositoryBinding
+		var binding *repositoryBinding
+		tkv, ok = ss.mapping[key]
 		if !ok {
 			optValue = reflect.New(optTy.Elem())
-			var pkv map[reflect.Type]string
-			if pkv, ok = ss.binding[key]; ok {
-				var p string
-				if p, ok = pkv[optTy]; ok {
-					_ = GetByKey(p, optValue.Interface())
-				}
-			}
+		} else if binding, ok = tkv[optTy]; !ok {
+			optValue = reflect.New(optTy.Elem())
+		} else if binding.value != nil {
+			optValue = reflect.ValueOf(binding.value)
+		} else {
+			optValue = reflect.ValueOf(configuration.GetByType(optTy, ss.config.GetSection(binding.path), ""))
 		}
 
 		return optValue.Interface()
+	}))
+
+	registerCallBackField := reflect.NewAt(registerCallBackTy, unsafe.Pointer(instanceValue.Elem().Field(1).UnsafeAddr())).Elem()
+	registerCallBackField.Set(reflect.ValueOf(func(key string, cb func()) {
+		if tkv, ok := ss.mapping[key]; !ok {
+			return
+		} else if binding, ok := tkv[optTy]; !ok {
+			return
+		} else if binding.value != nil {
+			return
+		} else if len(binding.path) == 0 {
+			return
+		} else {
+			ss.config.GetSection(binding.path).GetReloadNotifier().RegisterNotifyCallback(cb)
+		}
 	}))
 	return instanceValue.Interface()
 }

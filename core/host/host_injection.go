@@ -28,7 +28,7 @@ func Inject(scope injection.IRoutineScope, instance any) bool {
 				switch {
 				case argTy.ConvertibleTo(optionContainerType):
 					repo := injection.GetRoutine[*option.Repository](scope.GetRoot().GetProvider())
-					argInstance = repo.GetOption(argTy)
+					argInstance = repo.GetOptionWrapper(argTy)
 				case argTy.ConvertibleTo(loggerContainerType):
 					ch := injection.GetRoutine[*handler.CompoundHandler](scope.GetRoot().GetProvider())
 					argInstance = ch.WrapToContainer(argTy)

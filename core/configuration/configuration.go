@@ -50,3 +50,8 @@ type IConfigurationSection interface {
 	GetValue() (string, bool)
 	SetValue(key string, value string)
 }
+
+type IConfigurationManager interface {
+	IConfigurationBuilder
+	IConfigurationRoot
+}

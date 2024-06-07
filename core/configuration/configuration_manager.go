@@ -31,7 +31,7 @@ func (ss *Manager) Get(key string) string {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 
-	for i := ss.providers.Len(); i >= 0; i-- {
+	for i := ss.providers.Len() - 1; i >= 0; i-- {
 		if value, ok := ss.providers[i].TryGet(key); ok {
 			return value
 		}
@@ -43,7 +43,7 @@ func (ss *Manager) TryGet(key string) (value string, ok bool) {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 
-	for i := ss.providers.Len(); i >= 0; i-- {
+	for i := ss.providers.Len() - 1; i >= 0; i-- {
 		if value, ok := ss.providers[i].TryGet(key); ok {
 			return value, true
 		}
@@ -123,6 +123,7 @@ func (ss *Manager) GetSources() container.List[IConfigurationSource] {
 
 func (ss *Manager) AddSource(source IConfigurationSource) {
 	newProvider := source.BuildConfigurationProvider(ss)
+	newProvider.Load()
 
 	defer ss.notifier.Notify()
 

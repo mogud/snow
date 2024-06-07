@@ -7,15 +7,15 @@ import (
 )
 
 type nodeElementOption struct {
-	Host     string   `koanf:"host"`     // 节点地址
-	Port     int      `koanf:"port"`     // 节点端口
-	Order    int      `koanf:"order"`    // 节点排序
-	Services []string `koanf:"services"` // 具名服务
+	Host     string   `snow:"host"`     // 节点地址
+	Port     int      `snow:"port"`     // 节点端口
+	Order    int      `snow:"order"`    // 节点排序
+	Services []string `snow:"services"` // 具名服务
 }
 
 type NodeBootOption struct {
-	BootName string                        `koanf:"boot_name"` // 启动节点名
-	Nodes    map[string]*nodeElementOption `koanf:"nodes"`     // 所有节点数据
+	BootName string                        `snow:"boot_name"` // 启动节点名
+	Nodes    map[string]*nodeElementOption `snow:"nodes"`     // 所有节点数据
 }
 
 type nodeInfo struct {

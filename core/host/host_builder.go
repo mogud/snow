@@ -1,6 +1,7 @@
 package host
 
 import (
+	"github.com/mogud/snow/core/configuration"
 	"github.com/mogud/snow/core/injection"
 	"github.com/mogud/snow/core/logging"
 	"github.com/mogud/snow/core/logging/handler"
@@ -11,6 +12,7 @@ import (
 type IBuilder interface {
 	GetRoutineCollection() injection.IRoutineCollection
 	GetRoutineProvider() injection.IRoutineProvider
+	GetConfigurationManager() configuration.IConfigurationManager
 	Build() IHost
 }
 

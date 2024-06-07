@@ -46,7 +46,7 @@ func (ss *Root) TryGet(key string) (value string, ok bool) {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
 
-	for i := ss.providers.Len(); i >= 0; i-- {
+	for i := ss.providers.Len() - 1; i >= 0; i-- {
 		if value, ok := ss.providers[i].TryGet(key); ok {
 			return value, true
 		}

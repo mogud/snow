@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"github.com/mogud/snow/core/configuration"
 	"github.com/mogud/snow/core/host"
 	"github.com/mogud/snow/core/host/internal"
 	"github.com/mogud/snow/core/injection"
@@ -17,17 +18,24 @@ var _ host.IBuilder = (*DefaultBuilder)(nil)
 type DefaultBuilder struct {
 	descriptors injection.IRoutineCollection
 
+	config *configuration.Manager
+
 	provider injection.IRoutineProvider
 }
 
 func NewDefaultBuilder() *DefaultBuilder {
 	builder := &DefaultBuilder{
 		descriptors: internal.NewRoutineCollection(),
+		config:      configuration.NewManager(),
 	}
 	builder.provider = internal.NewProvider(builder.descriptors, nil)
 
+	host.AddVariantSingletonFactory[configuration.IConfiguration](builder, func(scope injection.IRoutineScope) configuration.IConfiguration {
+		return builder.config
+	})
+
 	host.AddSingletonFactory[*option.Repository](builder, func(scope injection.IRoutineScope) *option.Repository {
-		return option.NewOptionRepository()
+		return option.NewOptionRepository(builder.config)
 	})
 
 	host.AddSingletonFactory[*logging.LogFormatterContainer](builder, func(scope injection.IRoutineScope) *logging.LogFormatterContainer {
@@ -37,11 +45,11 @@ func NewDefaultBuilder() *DefaultBuilder {
 		return f
 	})
 
-	host.AddOption[*console.Option](builder, "Log.Console")
+	host.AddOption[*console.Option](builder, "Log:Console")
 	host.AddSingletonFactory[*console.Handler](builder, func(scope injection.IRoutineScope) *console.Handler {
 		return console.NewHandler()
 	})
-	host.AddOption[*file.Option](builder, "Log.File")
+	host.AddOption[*file.Option](builder, "Log:File")
 	host.AddSingletonFactory[*file.Handler](builder, func(scope injection.IRoutineScope) *file.Handler {
 		return file.NewHandler()
 	})
@@ -70,6 +78,10 @@ func (ss *DefaultBuilder) GetRoutineProvider() injection.IRoutineProvider {
 
 func (ss *DefaultBuilder) GetRoutineCollection() injection.IRoutineCollection {
 	return ss.descriptors
+}
+
+func (ss *DefaultBuilder) GetConfigurationManager() configuration.IConfigurationManager {
+	return ss.config
 }
 
 func (ss *DefaultBuilder) Build() host.IHost {

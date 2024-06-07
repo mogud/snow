@@ -16,13 +16,13 @@ import (
 var _ logging.ILogHandler = (*Handler)(nil)
 
 type Option struct {
-	LogPath          string                   `koanf:"LogPath"`
-	MaxLogChanLength int                      `koanf:"MaxLogChanLength"`
-	Formatter        string                   `koanf:"Formatter"`
-	WithFileLine     bool                     `koanf:"WithFileLine"`
-	FileLineSkip     int                      `koanf:"FileLineSkip"`
-	Filter           map[string]logging.Level `koanf:"Filter"`
-	DefaultLevel     logging.Level            `koanf:"DefaultLevel"`
+	LogPath          string                   `snow:"LogPath"`
+	MaxLogChanLength int                      `snow:"MaxLogChanLength"`
+	Formatter        string                   `snow:"Formatter"`
+	WithFileLine     bool                     `snow:"WithFileLine"`
+	FileLineSkip     int                      `snow:"FileLineSkip"`
+	Filter           map[string]logging.Level `snow:"Filter"`
+	DefaultLevel     logging.Level            `snow:"DefaultLevel"`
 }
 
 type Handler struct {
