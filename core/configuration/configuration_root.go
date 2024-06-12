@@ -3,7 +3,6 @@ package configuration
 import (
 	"github.com/mogud/snow/core/container"
 	"github.com/mogud/snow/core/notifier"
-	"strings"
 	"sync"
 )
 
@@ -74,8 +73,6 @@ func (ss *Root) GetChildren() container.List[IConfigurationSection] {
 func (ss *Root) GetChildrenByPath(path string) container.List[IConfigurationSection] {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
-
-	path = strings.ToUpper(path)
 
 	keySet := container.NewSet[string]()
 	for _, provider := range ss.providers {

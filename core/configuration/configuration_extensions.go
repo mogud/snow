@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func GetBool(config IConfiguration, key string) bool {
@@ -210,24 +211,44 @@ func fillValue(val reflect.Value, config IConfiguration, key string) {
 		}
 		val.Set(slice)
 	case reflect.Struct:
-		vs := reflect.New(ty).Elem()
+		var vs reflect.Value
+
 		section := config
 		if len(key) > 0 {
 			section = config.GetSection(key)
 		}
-		for i := 0; i < ty.NumField(); i++ {
-			fv := vs.Field(i)
-			ft := ty.Field(i)
-			if !ft.IsExported() {
-				continue
-			}
 
-			fName := ft.Tag.Get("snow")
-			if fName == "" {
-				fName = ft.Name
+		var isTime bool
+		if ty.Name() == "Time" && ty.PkgPath() == "time" {
+			isTime = true
+			if v, ok := config.TryGet(key); ok {
+				t, err := time.Parse(time.RFC3339, v)
+				if err == nil {
+					vs = reflect.ValueOf(t)
+				}
 			}
-			fillValue(fv, section, fName)
 		}
+
+		if !vs.IsValid() {
+			vs = reflect.New(ty).Elem()
+		}
+
+		if !isTime {
+			for i := 0; i < ty.NumField(); i++ {
+				fv := vs.Field(i)
+				ft := ty.Field(i)
+				if !ft.IsExported() {
+					continue
+				}
+
+				fName := ft.Tag.Get("snow")
+				if fName == "" {
+					fName = ft.Name
+				}
+				fillValue(fv, section, fName)
+			}
+		}
+
 		val.Set(vs)
 	default:
 		panic("unsupported type")

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,7 +22,7 @@ type FileConfigurationSource struct {
 	ReloadOnChange bool
 }
 
-func (ss *FileConfigurationSource) BuildConfigurationProvider(builder configuration.IConfigurationBuilder) configuration.IConfigurationProvider {
+func (ss *FileConfigurationSource) BuildConfigurationProvider(_ configuration.IConfigurationBuilder) configuration.IConfigurationProvider {
 	return NewFileConfigurationProvider(ss)
 }
 
@@ -68,6 +69,7 @@ func (ss *FileConfigurationProvider) Load() {
 		}
 
 		go func() {
+			var uniqueRead int32
 			for {
 				select {
 				case event, ok := <-watcher.Events:
@@ -75,18 +77,19 @@ func (ss *FileConfigurationProvider) Load() {
 						return
 					}
 					if event.Has(fsnotify.Write | fsnotify.Create) {
-						if pathEquals(event.Name, ss.path) {
+						if pathEquals(event.Name, ss.path) && atomic.CompareAndSwapInt32(&uniqueRead, 0, 1) {
 							log.Printf("file watcher received Write Or Create: %v", event.Name)
 							go func() {
-								time.After(500 * time.Millisecond)
+								<-time.After(500 * time.Millisecond)
+								atomic.StoreInt32(&uniqueRead, 0)
 								ss.loadFile()
 								ss.OnReload()
 							}()
 						}
-					} else if event.Has(fsnotify.Rename | fsnotify.Remove) {
+					} else if event.Has(fsnotify.Remove) {
 						if pathEquals(event.Name, ss.path) {
 							log.Printf("file watcher received Rename or Remove: %v", event.Name)
-							ss.Replace(container.NewMap[string, string]())
+							ss.Replace(container.NewCaseInsensitiveStringMap[string]())
 							ss.OnReload()
 						}
 					}

@@ -117,7 +117,6 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nbOpt *
 	if v, ok := kvs.Get[string]("NODE_TO_START"); ok && len(v) > 0 {
 		ss.nodeBootOpt.BootName = v
 	}
-	ss.nodeBootOpt.BootName = strings.ToUpper(ss.nodeBootOpt.BootName)
 
 	if v, ok := kvs.Get[string]("NODE_LISTEN_HOST"); ok && len(v) > 0 {
 		for name, nc := range ss.nodeBootOpt.Nodes {

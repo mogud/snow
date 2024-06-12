@@ -3,12 +3,10 @@ package configuration
 import (
 	"github.com/mogud/snow/core/container"
 	"github.com/mogud/snow/core/notifier"
-	"strings"
 	"sync"
 )
 
-var _ IConfigurationBuilder = (*Manager)(nil)
-var _ IConfigurationRoot = (*Manager)(nil)
+var _ IConfigurationManager = (*Manager)(nil)
 
 type Manager struct {
 	lock       sync.Mutex
@@ -44,11 +42,11 @@ func (ss *Manager) TryGet(key string) (value string, ok bool) {
 	defer ss.lock.Unlock()
 
 	for i := ss.providers.Len() - 1; i >= 0; i-- {
-		if value, ok := ss.providers[i].TryGet(key); ok {
+		if value, ok = ss.providers[i].TryGet(key); ok {
 			return value, true
 		}
 	}
-	return "", false
+	return
 }
 
 func (ss *Manager) Set(key string, value string) {
@@ -71,8 +69,6 @@ func (ss *Manager) GetChildren() container.List[IConfigurationSection] {
 func (ss *Manager) GetChildrenByPath(path string) container.List[IConfigurationSection] {
 	ss.lock.Lock()
 	defer ss.lock.Unlock()
-
-	path = strings.ToUpper(path)
 
 	keySet := container.NewSet[string]()
 	for _, provider := range ss.providers {
