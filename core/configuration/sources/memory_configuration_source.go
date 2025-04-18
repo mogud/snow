@@ -1,7 +1,7 @@
 package sources
 
 import (
-	"github.com/mogud/snow/core/configuration"
+	"snow/core/configuration"
 )
 
 var _ configuration.IConfigurationSource = (*MemoryConfigurationSource)(nil)

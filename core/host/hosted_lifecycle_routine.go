@@ -2,7 +2,7 @@ package host
 
 import (
 	"context"
-	"github.com/mogud/snow/core/sync"
+	"snow/core/sync"
 )
 
 type IHostedLifecycleRoutine interface {

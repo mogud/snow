@@ -2,7 +2,7 @@ package host
 
 import (
 	"context"
-	"github.com/mogud/snow/core/sync"
+	"snow/core/sync"
 )
 
 type IHostApplication interface {
@@ -16,17 +16,24 @@ type IHostApplication interface {
 func Run(h IHost) {
 	app := GetRoutine[IHostApplication](h.GetRoutineProvider())
 	ctx, cancel := context.WithCancel(context.Background())
+
+	started := false
 	app.OnStopping(func() {
 		cancel()
 	})
+	app.OnStarted(func() {
+		started = true
+	})
 
 	wg := sync.NewTimeoutWaitGroup()
-	h.Start(context.Background(), wg)
+	h.Start(ctx, wg)
 	wg.Wait()
 
 	<-ctx.Done()
 
-	wg = sync.NewTimeoutWaitGroup()
-	h.Stop(context.Background(), wg)
-	wg.Wait()
+	if started {
+		wg = sync.NewTimeoutWaitGroup()
+		h.Stop(context.Background(), wg)
+		wg.Wait()
+	}
 }

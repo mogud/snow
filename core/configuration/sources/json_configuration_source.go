@@ -3,10 +3,10 @@ package sources
 import (
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/mogud/snow/core/configuration"
-	"github.com/mogud/snow/core/container"
 	stripjsoncomments "github.com/trapcodeio/go-strip-json-comments"
 	"log"
+	"snow/core/configuration"
+	"snow/core/container"
 )
 
 var _ configuration.IConfigurationSource = (*JsonConfigurationSource)(nil)
@@ -53,7 +53,7 @@ func (ss *JsonConfigurationProvider) OnLoadJson(bytes []byte) {
 }
 
 func ConvertJsonToConfigurationKV(head string, json string) (*container.CaseInsensitiveStringMap[string], error) {
-	var jsons map[string]interface{}
+	var jsons map[string]any
 	if err := jsoniter.UnmarshalFromString(json, &jsons); err != nil {
 		return nil, fmt.Errorf("json unmashal failed: %v\n", err)
 	}
@@ -69,15 +69,15 @@ func ConvertJsonToConfigurationKV(head string, json string) (*container.CaseInse
 	return newMap, nil
 }
 
-func fillMap(m *container.CaseInsensitiveStringMap[string], key string, value interface{}) {
+func fillMap(m *container.CaseInsensitiveStringMap[string], key string, value any) {
 	switch v := value.(type) {
 	case string:
 		m.Add(key, v)
-	case map[string]interface{}:
+	case map[string]any:
 		for k, v := range v {
 			fillMap(m, fmt.Sprintf("%s:%s", key, k), v)
 		}
-	case []interface{}:
+	case []any:
 		for i, v := range v {
 			fillMap(m, fmt.Sprintf("%s:%d", key, i), v)
 		}

@@ -23,12 +23,12 @@ func (ss timerQueue) Swap(i, j int) {
 	ss[i], ss[j] = ss[j], ss[i]
 }
 
-func (ss *timerQueue) Push(x interface{}) {
+func (ss *timerQueue) Push(x any) {
 	item := x.(*timerItem)
 	*ss = append(*ss, item)
 }
 
-func (ss *timerQueue) Pop() interface{} {
+func (ss *timerQueue) Pop() any {
 	old := *ss
 	n := len(old)
 	x := old[n-1]

@@ -2,8 +2,8 @@ package node
 
 import (
 	"container/heap"
-	"github.com/mogud/snow/core/debug"
-	"github.com/mogud/snow/core/logging/slog"
+	"snow/core/debug"
+	"snow/core/logging/slog"
 	"time"
 )
 

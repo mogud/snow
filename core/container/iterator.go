@@ -1,7 +1,7 @@
 package container
 
 import (
-	"github.com/mogud/snow/core/constraints"
+	"snow/core/constraints"
 )
 
 type Iterator[T any] interface {

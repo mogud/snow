@@ -1,7 +1,7 @@
 package slog
 
 import (
-	"github.com/mogud/snow/core/logging"
+	"snow/core/logging"
 	"sync/atomic"
 )
 

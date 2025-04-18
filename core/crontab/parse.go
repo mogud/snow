@@ -19,8 +19,8 @@ var (
 	layoutRangeAndInterval    = `^(%value%)-(%value%)/(\d+)$`
 	fieldFinder               = regexp.MustCompile(`\S+`)
 	entryFinder               = regexp.MustCompile(`[^,]+`)
-	layoutRegexp              = make(map[string]*regexp.Regexp)
-	layoutRegexpLock          sync.Mutex
+
+	layoutRegexpLock sync.Mutex
 )
 
 type descriptorName string
@@ -324,10 +324,10 @@ func (ss *CTDesc) makeLayoutRegexp(layout, value string) *regexp.Regexp {
 	defer ss.layoutRegexpLock.Unlock()
 
 	layout = strings.Replace(layout, `%value%`, value, -1)
-	re := layoutRegexp[layout]
+	re := ss.layoutRegexp[layout]
 	if re == nil {
 		re = regexp.MustCompile(layout)
-		layoutRegexp[layout] = re
+		ss.layoutRegexp[layout] = re
 	}
 	return re
 }

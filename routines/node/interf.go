@@ -3,7 +3,7 @@ package node
 import "time"
 
 type IPromise interface {
-	Then(f interface{}) IPromise
+	Then(f any) IPromise
 	Catch(f func(error)) IPromise
 	Final(f func()) IPromise
 	Timeout(timeout time.Duration) IPromise
@@ -11,11 +11,9 @@ type IPromise interface {
 }
 
 type IProxy interface {
-	Call(fname string, args ...interface{}) IPromise
+	Call(name string, args ...any) IPromise
 	GetNodeAddr() INodeAddr
 	Avail() bool
-	Reset(proxy IProxy)
-	AddBuffer(n int, fullcb func())
 }
 
 type ITimer interface {
@@ -30,7 +28,8 @@ type ITimer interface {
 type IRpcContext interface {
 	GetRemoteNodeAddr() INodeAddr
 	GetRemoteServiceAddr() int32
-	Return(args ...interface{})
+	Catch(f func(error)) IRpcContext
+	Return(args ...any)
 	Error(error)
 }
 

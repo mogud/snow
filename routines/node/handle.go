@@ -5,11 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/mogud/snow/core/logging/slog"
-	"github.com/mogud/snow/core/task"
-	"github.com/mogud/snow/core/ticker"
 	"io"
 	"net"
+	"snow/core/logging/slog"
+	"snow/core/task"
+	"snow/core/ticker"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +22,7 @@ var ErrRemoteDisconnected = fmt.Errorf("remote disconnected")
 type session struct {
 	timeout time.Time
 	cb      func(m *message)
+	trace   int64
 }
 
 type remoteHandle struct {
@@ -29,71 +30,90 @@ type remoteHandle struct {
 	conn   net.Conn
 	w      io.Writer
 	r      io.Reader
-	naddr  NodeAddr
+	nAddr  Addr
 	status int32
 	ctx    context.Context
 	cancel func()
 
 	timeout int
 	sessCb  sync.Map // [request_code int]*session;
-	wbuf    chan *message
+	wBuf    chan *message
 	wg      sync.WaitGroup
 }
 
-func newServerHandle(node *Node, naddr NodeAddr, conn net.Conn) *remoteHandle {
-	ss := newRemoteHandle(node, naddr, conn)
+func newServerHandle(node *Node, nAddr Addr, conn net.Conn) *remoteHandle {
+	ss := newRemoteHandle(node, nAddr, conn)
 	var err error
 	if ss.r, ss.w, err = node.shPreprocessor.Process(conn); err != nil {
 		slog.Debugf("illegal remote(%s) connection: %v", conn.RemoteAddr().String(), err)
 		_ = conn.Close()
 	}
 
-	slog.Infof("node remote(%v) conntected", naddr)
+	slog.Infof("node remote(%v) conntected", nAddr)
 	return ss
 }
 
-func newRemoteHandle(node *Node, naddr NodeAddr, conn net.Conn) *remoteHandle {
+func newRemoteHandle(node *Node, nAddr Addr, conn net.Conn) *remoteHandle {
 	h := &remoteHandle{
 		node:   node,
 		conn:   conn,
-		naddr:  naddr,
+		nAddr:  nAddr,
 		status: 0,
-		wbuf:   make(chan *message, 1024*1024),
+		wBuf:   make(chan *message, 1024*1024),
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	return h
 }
 
 func (ss *remoteHandle) send(m *message) bool {
+	if ss.closed() {
+		slog.Debugf("remote handle(%v) closed", ss.nAddr)
+
+		if m.cb != nil {
+			em := &message{
+				trace: m.trace,
+				err:   ErrRemoteDisconnected,
+			}
+			m.cb(em)
+		}
+	}
+
 	if m != nil && m.sess > 0 {
 		s := &session{
-			cb: m.cb,
+			cb:    m.cb,
+			trace: m.trace,
 		}
 		if m.timeout > 0 {
 			s.timeout = time.Now().Add(m.timeout)
 		}
 		ss.sessCb.Store(m.sess, s)
+
+		if ss.closed() {
+			slog.Debugf("remote handle(%v) closed, close all sessions", ss.nAddr)
+
+			ss.closeAllSession()
+		}
 	}
 
 	select {
-	case ss.wbuf <- m:
+	case ss.wBuf <- m:
 		return true
 	default:
-		if ss.closed() {
-			ss.sessCb.Delete(m.sess)
+		if m == nil {
+			// ping 消息
+			return false
+		}
 
-			em := &message{}
-			em.writeError(ErrRemoteDisconnected)
-			m.cb(em)
-		} else {
-			slog.Warnf("remote handle(%v) message chan full", ss.naddr)
-			if m.sess > 0 {
-				ss.sessCb.Delete(m.sess)
+		slog.Warnf("remote handle(%v) message chan full", ss.nAddr)
 
-				em := &message{}
-				em.writeError(ErrNodeMessageChanFull)
-				m.cb(em)
+		ss.sessCb.Delete(m.sess)
+
+		if m.cb != nil {
+			em := &message{
+				trace: m.trace,
+				err:   ErrNodeMessageChanFull,
 			}
+			m.cb(em)
 		}
 		return true
 	}
@@ -121,8 +141,7 @@ func (ss *remoteHandle) start(isReceiver bool) {
 
 func (ss *remoteHandle) safeDelete() {
 	if atomic.CompareAndSwapInt32(&ss.status, 0, 1) {
-		nodeDelRemoteHandle(ss.naddr)
-		close(ss.wbuf)
+		nodeDelRemoteHandle(ss.nAddr)
 		ss.closeAllSession()
 	}
 }
@@ -133,7 +152,7 @@ func (ss *remoteHandle) closed() bool {
 
 func (ss *remoteHandle) clearSession() {
 	ch := make(chan int64, 1024)
-	ticker.Subscribe(-int64(ss.naddr), ch)
+	ticker.Subscribe(-int64(ss.nAddr), ch)
 	prev := time.Now()
 loop:
 	for {
@@ -147,34 +166,38 @@ loop:
 			}
 			prev = now
 
-			m := &message{}
-			m.writeError(ErrRequestTimeoutRemote)
-
 			zero := time.Time{}
-			ss.sessCb.Range(func(key, value interface{}) bool {
+			ss.sessCb.Range(func(key, value any) bool {
 				v := value.(*session)
 				if !v.timeout.Equal(zero) && v.timeout.Before(now) {
 					ss.sessCb.Delete(key)
 
+					m := &message{
+						trace: v.trace,
+						err:   ErrRequestTimeoutRemote,
+					}
 					v.cb(m)
 				}
 				return true
 			})
 		}
 	}
-	ticker.Unsubscribe(-int64(ss.naddr))
+	ticker.Unsubscribe(-int64(ss.nAddr))
 	ss.wg.Done()
 }
 
 func (ss *remoteHandle) closeAllSession() {
-	m := &message{}
-	m.writeError(ErrRemoteDisconnected)
+	ss.sessCb.Range(func(key, _ any) bool {
+		value, ok := ss.sessCb.LoadAndDelete(key)
+		if ok {
+			v := value.(*session)
+			m := &message{
+				err:   ErrRemoteDisconnected,
+				trace: v.trace,
+			}
+			v.cb(m)
+		}
 
-	ss.sessCb.Range(func(key, value interface{}) bool {
-		ss.sessCb.Delete(key)
-
-		v := value.(*session)
-		v.cb(m)
 		return true
 	})
 }
@@ -185,11 +208,11 @@ loop:
 		select {
 		case <-ss.ctx.Done():
 			break loop
-		case m, ok := <-ss.wbuf:
+		case m, ok := <-ss.wBuf:
 			bs, err := m.marshal()
 			if err != nil {
 				slog.Errorf("message marshal %v", err.Error())
-				return
+				break
 			}
 
 			if !ok {
@@ -197,16 +220,17 @@ loop:
 			}
 			n, err := ss.conn.Write(bs)
 			if err != nil {
-				slog.Errorf("write to %v error: %+v", ss.naddr, err)
+				slog.Errorf("write to %v error: %+v", ss.nAddr, err)
 				break loop
 			}
 			if n != len(bs) {
-				slog.Errorf("write to %v error: length not match", ss.naddr)
+				slog.Errorf("write to %v error: length not match", ss.nAddr)
 				break loop
 			}
 		}
 	}
 	_ = ss.conn.Close()
+	ss.cancel()
 	ss.wg.Done()
 }
 
@@ -225,6 +249,7 @@ loop:
 		case errors.As(err, &e) && e.Timeout():
 			if isReceiver {
 				if ss.timeout > 9 {
+					// 发送 ping 消息
 					ss.send((*message)(nil))
 					ss.timeout = 0
 				} else {
@@ -233,10 +258,10 @@ loop:
 			}
 			continue
 		case errors.Is(err, net.ErrClosed):
-			slog.Debugf("remote(%v) connection closed", ss.naddr)
+			slog.Debugf("remote(%v) connection closed", ss.nAddr)
 			break loop
 		case err != nil:
-			slog.Warnf("receive remote(%v) message failed: %v", ss.naddr, err)
+			slog.Warnf("receive remote(%v) message failed: %v", ss.nAddr, err)
 			break loop
 		}
 
@@ -263,7 +288,7 @@ func (ss *remoteHandle) doDivide(data []byte) []byte {
 		}
 		msgLen := int(binary.LittleEndian.Uint32(data[:4]))
 		if msgLen < 4 {
-			slog.Errorf("net message from %v format error", ss.naddr)
+			slog.Errorf("net message from %v format error", ss.nAddr)
 			return nil
 		}
 		if len(data) < msgLen {
@@ -273,21 +298,27 @@ func (ss *remoteHandle) doDivide(data []byte) []byte {
 
 		m := &message{}
 		if err := m.unmarshal(msg); err != nil {
-			slog.Errorf("net message from %v decode error", ss.naddr)
+			slog.Errorf("net message from %v decode error", ss.nAddr)
 			return nil
 		}
 
-		if m.dst != 0 { // dst == 0 代表是 ping 包
-			m.naddr = ss.naddr
+		if m.dst != 0 {
+			// dst 不为 0，不是 ping 包，需要处理
+
+			m.nAddr = ss.nAddr
 			ss.doDispatch(m)
 		}
+
+		// dst == 0 代表是 ping 包，ping 包为全 0 的 4 个字节
 		data = data[msgLen:]
 	}
 	return data
 }
 
 func (ss *remoteHandle) doDispatch(m *message) {
-	if m.sess < 0 { // response
+	if m.sess < 0 {
+		// response
+
 		scb, ok := ss.sessCb.Load(-m.sess)
 		if ok {
 			ss.sessCb.Delete(-m.sess)
@@ -299,7 +330,9 @@ func (ss *remoteHandle) doDispatch(m *message) {
 		return
 	}
 
-	if m.src == 0 { // error occurs
+	if m.src == 0 {
+		// error occurs
+
 		slog.Warnf("remote error, code: %+v", m.getError())
 		return
 	}
@@ -309,14 +342,15 @@ func (ss *remoteHandle) doDispatch(m *message) {
 	if srv != nil {
 		srv.send(m)
 	} else {
-		slog.Warnf("remote(%v) call service(%d) which not found, message data: %+v", ss.naddr, m.dst, m)
+		slog.Warnf("remote(%v) call service(%d) which not found, message data: %+v", ss.nAddr, m.dst, m)
 		mm := &message{
-			naddr: m.naddr,
+			nAddr: m.nAddr,
 			src:   0,
 			dst:   m.src,
 			sess:  -m.sess,
+			trace: m.trace,
+			err:   fmt.Errorf("invalid address"),
 		}
-		mm.writeError(fmt.Errorf("invalid address"))
 		ss.send(mm)
 	}
 }

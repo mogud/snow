@@ -1,12 +1,12 @@
 package host
 
 import (
-	"github.com/mogud/snow/core/configuration"
-	"github.com/mogud/snow/core/injection"
-	"github.com/mogud/snow/core/logging"
-	"github.com/mogud/snow/core/logging/handler"
-	"github.com/mogud/snow/core/option"
 	"reflect"
+	"snow/core/configuration"
+	"snow/core/injection"
+	"snow/core/logging"
+	"snow/core/logging/handler/compound"
+	"snow/core/option"
 )
 
 type IBuilder interface {
@@ -37,7 +37,7 @@ func AddKeyedOptionFactory[T any](builder IBuilder, key string, factory func() T
 }
 
 func AddLogHandler[T logging.ILogHandler](builder IBuilder, factory func() T) {
-	ch := injection.GetRoutine[*handler.CompoundHandler](builder.GetRoutineProvider())
+	ch := injection.GetRoutine[*compound.Handler](builder.GetRoutineProvider())
 	ch.AddHandler(factory())
 }
 

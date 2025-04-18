@@ -5,7 +5,7 @@ import (
 	"unsafe"
 )
 
-type TagFunc struct {
+type tagFunc struct {
 	Tag string
 	F   func()
 }
@@ -25,7 +25,7 @@ type funcQueue struct {
 }
 
 type funcNode struct {
-	value *TagFunc
+	value *tagFunc
 	next  unsafe.Pointer
 }
 
@@ -39,7 +39,7 @@ func (ss *funcQueue) empty() bool {
 	return funcNodeLoad(&ss.head) == funcNodeLoad(&ss.tail)
 }
 
-func (ss *funcQueue) enq(v *TagFunc) {
+func (ss *funcQueue) enq(v *tagFunc) {
 	n := &funcNode{value: v}
 	for {
 		last := funcNodeLoad(&ss.tail)
@@ -57,7 +57,7 @@ func (ss *funcQueue) enq(v *TagFunc) {
 	}
 }
 
-func (ss *funcQueue) deq() *TagFunc {
+func (ss *funcQueue) deq() *tagFunc {
 	for {
 		first := funcNodeLoad(&ss.head)
 		last := funcNodeLoad(&ss.tail)

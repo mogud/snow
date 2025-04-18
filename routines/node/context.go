@@ -1,7 +1,6 @@
 package node
 
 var _ = (IRpcContext)((*rpcContext)(nil))
-var EmptyContext = (IRpcContext)((*rpcContext)(nil))
 
 type rpcContext struct {
 	mRsp    *message
@@ -11,7 +10,7 @@ type rpcContext struct {
 	flushCb func()
 }
 
-func newContext(srv *Service, mRsp, mReq *message, flushCb func()) *rpcContext {
+func newRpcContext(srv *Service, mRsp, mReq *message, flushCb func()) *rpcContext {
 	return &rpcContext{
 		mRsp:    mRsp,
 		mReq:    mReq,
@@ -21,26 +20,27 @@ func newContext(srv *Service, mRsp, mReq *message, flushCb func()) *rpcContext {
 }
 
 func (ss *rpcContext) GetRemoteNodeAddr() INodeAddr {
-	return ss.mReq.naddr
+	return ss.mReq.nAddr
 }
 
 func (ss *rpcContext) GetRemoteServiceAddr() int32 {
 	return ss.mReq.src
 }
 
-func (ss *rpcContext) Return(args ...interface{}) {
-	if ss == nil {
-		return
+func (ss *rpcContext) Catch(f func(error)) IRpcContext {
+	ss.mRsp.cb = func(m *message) {
+		f(m.err)
 	}
+	return ss
+}
+
+func (ss *rpcContext) Return(args ...any) {
 	ss.mRsp.writeResponse(args...)
 	ss.flush()
 }
 
 func (ss *rpcContext) Error(err error) {
-	if ss == nil {
-		return
-	}
-	ss.mRsp.writeError(err)
+	ss.mRsp.err = err
 	ss.mRsp.src = 0
 	ss.flush()
 }
@@ -59,12 +59,12 @@ func (ss *rpcContext) flush() {
 	if mReq.sess > 0 {
 		if mReq.cb != nil { // local service message
 			mReq.cb(mRsp)
-		} else if mReq.naddr != 0 { // must be remote message
-			sender := nodeGetMessageSender(mReq.naddr, mReq.src, false, nil)
+		} else if mReq.nAddr != 0 { // must be remote message
+			sender := nodeGetMessageSender(mReq.nAddr, mReq.src, false, nil)
 			if sender != nil {
 				sender.send(mRsp)
 			} else {
-				ss.srv.Errorf("service at naddr(%v) saddr(%#8x) not found when rpc return", mReq.naddr, mReq.src)
+				ss.srv.Errorf("service at nAddr(%v) sAddr(%#8x) not found when rpc return", mReq.nAddr, mReq.src)
 			}
 		} // else is a local post
 	}

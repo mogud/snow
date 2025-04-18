@@ -10,7 +10,7 @@ var p *ants.PoolWithFunc
 
 func init() { // TODO
 	var err error
-	p, err = ants.NewPoolWithFunc(100000, func(f interface{}) {
+	p, err = ants.NewPoolWithFunc(100000, func(f any) {
 		(f.(func()))()
 	}, ants.WithPreAlloc(true))
 

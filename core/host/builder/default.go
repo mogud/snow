@@ -1,16 +1,17 @@
 package builder
 
 import (
-	"github.com/mogud/snow/core/configuration"
-	"github.com/mogud/snow/core/host"
-	"github.com/mogud/snow/core/host/internal"
-	"github.com/mogud/snow/core/injection"
-	"github.com/mogud/snow/core/logging"
-	"github.com/mogud/snow/core/logging/handler"
-	"github.com/mogud/snow/core/logging/handler/console"
-	"github.com/mogud/snow/core/logging/handler/file"
-	"github.com/mogud/snow/core/logging/slog"
-	"github.com/mogud/snow/core/option"
+	"snow/core/configuration"
+	"snow/core/host"
+	"snow/core/host/internal"
+	"snow/core/injection"
+	"snow/core/logging"
+	"snow/core/logging/handler"
+	"snow/core/logging/handler/compound"
+	"snow/core/logging/handler/console"
+	"snow/core/logging/handler/file"
+	"snow/core/logging/slog"
+	"snow/core/option"
 )
 
 var _ host.IBuilder = (*DefaultBuilder)(nil)
@@ -45,6 +46,10 @@ func NewDefaultBuilder() *DefaultBuilder {
 		return f
 	})
 
+	host.AddOption[*compound.Option](builder, "Log:Compound")
+	host.AddSingletonFactory[*compound.Handler](builder, func(scope injection.IRoutineScope) *compound.Handler {
+		return compound.NewHandler()
+	})
 	host.AddOption[*console.Option](builder, "Log:Console")
 	host.AddSingletonFactory[*console.Handler](builder, func(scope injection.IRoutineScope) *console.Handler {
 		return console.NewHandler()
@@ -53,14 +58,15 @@ func NewDefaultBuilder() *DefaultBuilder {
 	host.AddSingletonFactory[*file.Handler](builder, func(scope injection.IRoutineScope) *file.Handler {
 		return file.NewHandler()
 	})
-	host.AddSingletonFactory[*handler.CompoundHandler](builder, func(scope injection.IRoutineScope) *handler.CompoundHandler {
+	host.AddSingletonFactory[*handler.RootHandler](builder, func(scope injection.IRoutineScope) *handler.RootHandler {
+		compoundH := injection.GetRoutine[*compound.Handler](builder.provider)
 		ch := injection.GetRoutine[*console.Handler](builder.provider)
 		fh := injection.GetRoutine[*file.Handler](builder.provider)
 
-		compoundHandler := handler.NewCompoundHandler()
-		compoundHandler.AddHandler(ch)
-		compoundHandler.AddHandler(fh)
+		compoundH.AddHandler(ch)
+		compoundH.AddHandler(fh)
 
+		compoundHandler := handler.NewRootHandler(compoundH)
 		slog.BindGlobalHandler(compoundHandler)
 
 		return compoundHandler

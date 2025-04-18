@@ -1,8 +1,8 @@
 package sync_test
 
 import (
-	"github.com/mogud/snow/core/sync"
 	"github.com/stretchr/testify/assert"
+	"snow/core/sync"
 	"sync/atomic"
 	"testing"
 	"time"

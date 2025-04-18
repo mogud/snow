@@ -1,8 +1,8 @@
 package container
 
 import (
-	"github.com/mogud/snow/core/constraints"
 	"github.com/tidwall/btree"
+	"snow/core/constraints"
 )
 
 var _ = Iterator[int]((*OrderedSet[int])(nil))

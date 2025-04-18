@@ -6,38 +6,43 @@ import (
 	"strconv"
 )
 
-var _ = (INodeAddr)((*NodeAddr)(nil))
+var _ = (INodeAddr)((*Addr)(nil))
 
 var (
-	NodeAddrInvalid = NodeAddr(-1)
-	NodeAddrLocal   = NodeAddr(0)
+	addrAutoSearch = Addr(-2)
+	AddrInvalid    = Addr(-1)
+	AddrLocal      = Addr(0)
 )
 
-type NodeAddr int64
+type Addr int64
 
-func (ss NodeAddr) IsLocalhost() bool {
+func (ss Addr) IsLocalhost() bool {
 	return ss == 0 || net.IP([]byte{byte(ss >> 56), byte(ss >> 48), byte(ss >> 40), byte(ss >> 32)}).IsLoopback()
 }
 
-func (ss NodeAddr) GetIPString() string {
+func (ss Addr) GetIPString() string {
 	return net.IP([]byte{byte(ss >> 56), byte(ss >> 48), byte(ss >> 40), byte(ss >> 32)}).String()
 }
 
-func (ss NodeAddr) String() string {
+func (ss Addr) GetPort() int {
+	return int(ss & 0xffff)
+}
+
+func (ss Addr) String() string {
 	return (&net.TCPAddr{
-		IP:   net.IP([]byte{byte(ss >> 56), byte(ss >> 48), byte(ss >> 40), byte(ss >> 32)}),
+		IP:   []byte{byte(ss >> 56), byte(ss >> 48), byte(ss >> 40), byte(ss >> 32)},
 		Port: int(ss & 0xffff),
 	}).String()
 }
 
-func NewNodeAddr(host string, port int) (NodeAddr, error) {
+func NewNodeAddr(host string, port int) (Addr, error) {
 	ipaddr, err := net.ResolveTCPAddr("tcp4", host+":"+strconv.Itoa(port))
 	if err != nil {
 		return 0, err
 	}
 
 	if len(ipaddr.IP) == 0 {
-		return NodeAddr(port), nil
+		return Addr(port), nil
 	}
 
 	v4 := ipaddr.IP.To4()
@@ -45,5 +50,5 @@ func NewNodeAddr(host string, port int) (NodeAddr, error) {
 		return 0, fmt.Errorf("IPv6(%v) is not supported", host+":"+strconv.Itoa(port))
 	}
 
-	return NodeAddr(v4[0])<<56 | NodeAddr(v4[1])<<48 | NodeAddr(v4[2])<<40 | NodeAddr(v4[3])<<32 | NodeAddr(port), nil
+	return Addr(v4[0])<<56 | Addr(v4[1])<<48 | Addr(v4[2])<<40 | Addr(v4[3])<<32 | Addr(port), nil
 }

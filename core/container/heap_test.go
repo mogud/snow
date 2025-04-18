@@ -1,7 +1,7 @@
 package container_test
 
 import (
-	"github.com/mogud/snow/core/container"
+	"snow/core/container"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

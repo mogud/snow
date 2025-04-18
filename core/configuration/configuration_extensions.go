@@ -147,55 +147,7 @@ func fillValue(val reflect.Value, config IConfiguration, key string) {
 			val.SetFloat(v)
 		}
 	case reflect.Map:
-		mapSection := config.GetSection(key)
-		children := mapSection.GetChildren()
-		m := reflect.MakeMap(ty)
-		for _, child := range children {
-			mKey := child.GetKey()
-			k := reflect.New(ty.Key()).Elem()
-			switch ty.Key().Kind() {
-			case reflect.String:
-				k.SetString(mKey)
-			case reflect.Int:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((int)(v)))
-			case reflect.Int8:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((int8)(v)))
-			case reflect.Int16:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((int16)(v)))
-			case reflect.Int32:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((int32)(v)))
-			case reflect.Int64:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt(v)
-			case reflect.Uint:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((uint)(v)))
-			case reflect.Uint8:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((uint8)(v)))
-			case reflect.Uint16:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((uint16)(v)))
-			case reflect.Uint32:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((uint32)(v)))
-			case reflect.Uint64:
-				v, _ := strconv.ParseInt(mKey, 10, 64)
-				k.SetInt((int64)((uint64)(v)))
-			default:
-				panic("unhandled default case")
-			}
-
-			v := reflect.New(ty.Elem()).Elem()
-			fillValue(v, config.GetSection(key), mKey)
-
-			m.SetMapIndex(k, v)
-		}
-		val.Set(m)
+		fillMap(ty, val, config, key)
 	case reflect.Pointer:
 		pv := reflect.New(ty.Elem())
 		v := pv.Elem()
@@ -211,46 +163,102 @@ func fillValue(val reflect.Value, config IConfiguration, key string) {
 		}
 		val.Set(slice)
 	case reflect.Struct:
-		var vs reflect.Value
-
-		section := config
-		if len(key) > 0 {
-			section = config.GetSection(key)
-		}
-
-		var isTime bool
-		if ty.Name() == "Time" && ty.PkgPath() == "time" {
-			isTime = true
-			if v, ok := config.TryGet(key); ok {
-				t, err := time.Parse(time.RFC3339, v)
-				if err == nil {
-					vs = reflect.ValueOf(t)
-				}
-			}
-		}
-
-		if !vs.IsValid() {
-			vs = reflect.New(ty).Elem()
-		}
-
-		if !isTime {
-			for i := 0; i < ty.NumField(); i++ {
-				fv := vs.Field(i)
-				ft := ty.Field(i)
-				if !ft.IsExported() {
-					continue
-				}
-
-				fName := ft.Tag.Get("snow")
-				if fName == "" {
-					fName = ft.Name
-				}
-				fillValue(fv, section, fName)
-			}
-		}
-
-		val.Set(vs)
+		fillStruct(ty, val, config, key)
 	default:
 		panic("unsupported type")
 	}
+}
+
+func fillMap(ty reflect.Type, val reflect.Value, config IConfiguration, key string) {
+	mapSection := config.GetSection(key)
+	children := mapSection.GetChildren()
+	m := reflect.MakeMap(ty)
+	for _, child := range children {
+		mKey := child.GetKey()
+		k := reflect.New(ty.Key()).Elem()
+		switch ty.Key().Kind() {
+		case reflect.String:
+			k.SetString(mKey)
+		case reflect.Int:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((int)(v)))
+		case reflect.Int8:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((int8)(v)))
+		case reflect.Int16:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((int16)(v)))
+		case reflect.Int32:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((int32)(v)))
+		case reflect.Int64:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt(v)
+		case reflect.Uint:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((uint)(v)))
+		case reflect.Uint8:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((uint8)(v)))
+		case reflect.Uint16:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((uint16)(v)))
+		case reflect.Uint32:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((uint32)(v)))
+		case reflect.Uint64:
+			v, _ := strconv.ParseInt(mKey, 10, 64)
+			k.SetInt((int64)((uint64)(v)))
+		default:
+			panic("unhandled default case")
+		}
+
+		v := reflect.New(ty.Elem()).Elem()
+		fillValue(v, config.GetSection(key), mKey)
+
+		m.SetMapIndex(k, v)
+	}
+	val.Set(m)
+}
+
+func fillStruct(ty reflect.Type, val reflect.Value, config IConfiguration, key string) {
+	var vs reflect.Value
+
+	section := config
+	if len(key) > 0 {
+		section = config.GetSection(key)
+	}
+
+	var isTime bool
+	if ty.Name() == "Time" && ty.PkgPath() == "time" {
+		isTime = true
+		if v, ok := config.TryGet(key); ok {
+			t, err := time.Parse(time.RFC3339, v)
+			if err == nil {
+				vs = reflect.ValueOf(t)
+			}
+		}
+	}
+
+	if !vs.IsValid() {
+		vs = reflect.New(ty).Elem()
+	}
+
+	if !isTime {
+		for i := 0; i < ty.NumField(); i++ {
+			fv := vs.Field(i)
+			ft := ty.Field(i)
+			if !ft.IsExported() {
+				continue
+			}
+
+			fName := ft.Tag.Get("snow")
+			if fName == "" {
+				fName = ft.Name
+			}
+			fillValue(fv, section, fName)
+		}
+	}
+
+	val.Set(vs)
 }

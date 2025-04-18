@@ -1,7 +1,7 @@
 package math
 
 import (
-	"github.com/mogud/snow/core/constraints"
+	"snow/core/constraints"
 )
 
 func Clamp[T constraints.Ordered](v T, minV T, maxV T) T {

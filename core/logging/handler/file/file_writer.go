@@ -2,9 +2,9 @@ package file
 
 import (
 	"fmt"
-	"github.com/mogud/snow/core/task"
 	"os"
 	"path"
+	"snow/core/task"
 )
 
 type writerElement struct {
@@ -13,13 +13,12 @@ type writerElement struct {
 }
 
 type writer struct {
-	files map[string]*os.File
+	fileName string
+	file     *os.File
 }
 
 func newWriter(c <-chan *writerElement) *writer {
-	w := &writer{
-		files: make(map[string]*os.File),
-	}
+	w := &writer{}
 	task.Execute(func() { w.loop(c) })
 	return w
 }
@@ -31,16 +30,8 @@ func (ss *writer) loop(c <-chan *writerElement) {
 			break
 		}
 
-		if unit == nil { // clear files
-			for _, f := range ss.files {
-				_ = f.Close()
-			}
-			ss.files = make(map[string]*os.File)
-			continue
-		}
-
-		if f, ok := ss.files[unit.File]; ok {
-			_, _ = fmt.Fprintln(f, unit.Message)
+		if ss.fileName == unit.File {
+			_, _ = fmt.Fprintln(ss.file, unit.Message)
 			continue
 		}
 
@@ -53,7 +44,13 @@ func (ss *writer) loop(c <-chan *writerElement) {
 			continue
 		}
 
-		ss.files[unit.File] = f
+		if ss.file != nil {
+			_ = ss.file.Close()
+		}
+
+		fmt.Printf("### NOTICE ### create log file <%s>\n", unit.File)
+		ss.file = f
+		ss.fileName = unit.File
 		_, _ = fmt.Fprintln(f, unit.Message)
 	}
 }

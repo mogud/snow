@@ -12,11 +12,11 @@ func LocalKey(privateKey, anotherPublicKey uint64) uint64 {
 
 type DH struct {
 	P uint64
-	A uint64
+	G uint64
 }
 
 func (ss *DH) PublicKeyOf(privateKey uint64) uint64 {
-	return ss.powModP(ss.A, privateKey)
+	return ss.powModP(ss.G, privateKey)
 }
 
 func (ss *DH) LocalKey(privateKey, anotherPublicKey uint64) uint64 {
@@ -57,6 +57,12 @@ func (ss *DH) powModPImpl(a, b uint64) uint64 {
 }
 
 func (ss *DH) powModP(a, b uint64) uint64 {
+	if a == 0 {
+		panic("DH64 zero public key")
+	}
+	if b == 0 {
+		panic("DH64 zero private key")
+	}
 	if a > ss.P {
 		a %= ss.P
 	}

@@ -3,11 +3,11 @@ package internal
 import (
 	"context"
 	"fmt"
-	"github.com/mogud/snow/core/host"
-	"github.com/mogud/snow/core/injection"
-	"github.com/mogud/snow/core/logging"
-	"github.com/mogud/snow/core/option"
-	"github.com/mogud/snow/core/sync"
+	"snow/core/host"
+	"snow/core/injection"
+	"snow/core/logging"
+	"snow/core/option"
+	"snow/core/sync"
 	"time"
 	"unsafe"
 )
@@ -56,6 +56,17 @@ func (ss *Host) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	if ss.app == nil {
 		ss.app = injection.GetRoutine[host.IHostApplication](ss.provider).(*HostApplication)
 	}
+
+	defer func() {
+		select {
+		case <-ctx.Done():
+			ss.app.EmitRoutineStartedFailed()
+			return
+		default:
+			ss.app.EmitRoutineStartedSuccess()
+		}
+	}()
+
 	if ss.hostedRoutineContainer == nil {
 		ss.hostedRoutineContainer = injection.GetRoutine[host.IHostedRoutineContainer](ss.provider)
 		ss.hostedRoutineContainer.BuildHostedRoutines()
@@ -67,28 +78,25 @@ func (ss *Host) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		ss.hostedLifecycleRoutines = ss.hostedLifecycleRoutineContainer.GetHostedLifecycleRoutines()
 	}
 
-	combinedCtx, cancel := context.WithCancel(context.Background())
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-ss.app.ctx.Done():
-		}
-		cancel()
-	}()
-
 	if len(ss.hostedLifecycleRoutines) > 0 {
 		routineWg := sync.NewTimeoutWaitGroup()
 		routineWg.Add(len(ss.hostedLifecycleRoutines))
 		for _, routine := range ss.hostedLifecycleRoutines {
 			routine := routine
 			go func() {
-				routine.BeforeStart(combinedCtx, routineWg)
+				routine.BeforeStart(ctx, routineWg)
 				routineWg.Done()
 			}()
 		}
 		if !routineWg.WaitTimeout(time.Duration(ss.option.StartWaitTimeoutSeconds) * time.Second) {
 			ss.logger.Warnf("'BeforeStart' wait timeout in hosted lifecycle routines")
 		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	default:
 	}
 
 	if len(ss.hostedLifecycleRoutines) > 0 || len(ss.hostedRoutines) > 0 {
@@ -98,17 +106,18 @@ func (ss *Host) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 			for _, routine := range ss.hostedLifecycleRoutines {
 				routine := routine
 				go func() {
-					routine.Start(combinedCtx, routineWg)
+					routine.Start(ctx, routineWg)
 					routineWg.Done()
 				}()
 			}
 		}
+
 		if len(ss.hostedRoutines) > 0 {
 			routineWg.Add(len(ss.hostedRoutines))
 			for _, routine := range ss.hostedRoutines {
 				routine := routine
 				go func() {
-					routine.Start(combinedCtx, routineWg)
+					routine.Start(ctx, routineWg)
 					routineWg.Done()
 				}()
 			}
@@ -118,13 +127,19 @@ func (ss *Host) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		}
 	}
 
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	if len(ss.hostedLifecycleRoutines) > 0 {
 		routineWg := sync.NewTimeoutWaitGroup()
 		routineWg.Add(len(ss.hostedLifecycleRoutines))
 		for _, routine := range ss.hostedLifecycleRoutines {
 			routine := routine
 			go func() {
-				routine.AfterStart(combinedCtx, routineWg)
+				routine.AfterStart(ctx, routineWg)
 				routineWg.Done()
 			}()
 		}
@@ -132,10 +147,6 @@ func (ss *Host) Start(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 		if !routineWg.WaitTimeout(time.Duration(ss.option.StartWaitTimeoutSeconds) * time.Second) {
 			ss.logger.Warnf("'AfterStart' wait timeout in hosted lifecycle routines")
 		}
-	}
-
-	for _, listener := range ss.app.startedListeners {
-		listener()
 	}
 }
 
@@ -201,9 +212,7 @@ func (ss *Host) Stop(ctx context.Context, wg *sync.TimeoutWaitGroup) {
 	}
 
 	if ss.app != nil {
-		for _, listener := range ss.app.stoppedListeners {
-			listener()
-		}
+		ss.app.EmitRoutineStopped()
 	}
 }
 

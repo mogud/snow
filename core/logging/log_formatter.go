@@ -34,28 +34,35 @@ func DefaultLogFormatter(logData *LogData) string {
 		hour, m, sec,
 		now.Nanosecond()/1000/1000/10,
 	))
-	sb.WriteString(" " + l2info[logData.Level].str)
-
-	id := logData.ID
-	if len(id) == 0 {
-		id = "-"
-	} else if len(id) > 12 {
-		id = id[:10] + ".."
+	if len(logData.NodeName) > 26 {
+		sb.WriteString(fmt.Sprintf(" %6d|%-24s..", logData.NodeID, logData.NodeName[:24]))
+	} else {
+		sb.WriteString(fmt.Sprintf(" %6d|%-26s", logData.NodeID, logData.NodeName))
 	}
-	sb.WriteString(fmt.Sprintf(" %12s", id))
+	sb.WriteString(" ")
+	sb.WriteString(l2info[logData.Level].str)
 
-	name := logData.Name
-	if len(name) == 0 {
-		name = "System"
-	} else if len(name) > 16 {
-		name = name[:14] + ".."
+	if len(logData.ID) == 0 {
+		sb.WriteString("            -")
+	} else if len(logData.ID) > 12 {
+		sb.WriteString(fmt.Sprintf(" %10s..", logData.ID[:10]))
+	} else {
+		sb.WriteString(fmt.Sprintf(" %12s", logData.ID))
 	}
-	sb.WriteString(fmt.Sprintf(" %16s", name))
+
+	if len(logData.Name) == 0 {
+		sb.WriteString("           System")
+	} else if len(logData.Name) > 16 {
+		sb.WriteString(fmt.Sprintf(" %14s..", logData.Name[:14]))
+	} else {
+		sb.WriteString(fmt.Sprintf(" %16s", logData.Name))
+	}
 
 	if len(logData.File) != 0 {
 		sb.WriteString(fmt.Sprintf(" %s(%d)", logData.File, logData.Line))
 	}
-	sb.WriteString(" " + logData.Message())
+	sb.WriteString(" ")
+	sb.WriteString(logData.Message())
 	return sb.String()
 }
 
@@ -70,29 +77,36 @@ func ColorLogFormatter(logData *LogData) string {
 		hour, m, sec,
 		now.Nanosecond()/1000/1000/10,
 	))
+	if len(logData.NodeName) > 26 {
+		sb.WriteString(fmt.Sprintf(" %6d|%-24s..", logData.NodeID, logData.NodeName[:24]))
+	} else {
+		sb.WriteString(fmt.Sprintf(" %6d|%-26s", logData.NodeID, logData.NodeName))
+	}
 	sb.WriteString(l2info[logData.Level].color)
-	sb.WriteString(" " + l2info[logData.Level].str)
+	sb.WriteString(" ")
+	sb.WriteString(l2info[logData.Level].str)
 
-	id := logData.ID
-	if len(id) == 0 {
-		id = "-"
-	} else if len(id) > 12 {
-		id = id[:10] + ".."
+	if len(logData.ID) == 0 {
+		sb.WriteString("            -")
+	} else if len(logData.ID) > 12 {
+		sb.WriteString(fmt.Sprintf(" %10s..", logData.ID[:10]))
+	} else {
+		sb.WriteString(fmt.Sprintf(" %12s", logData.ID))
 	}
-	sb.WriteString(fmt.Sprintf(" %12s", id))
 
-	name := logData.Name
-	if len(name) == 0 {
-		name = "System"
-	} else if len(name) > 16 {
-		name = name[:14] + ".."
+	if len(logData.Name) == 0 {
+		sb.WriteString("           System")
+	} else if len(logData.Name) > 16 {
+		sb.WriteString(fmt.Sprintf(" %14s..", logData.Name[:14]))
+	} else {
+		sb.WriteString(fmt.Sprintf(" %16s", logData.Name))
 	}
-	sb.WriteString(fmt.Sprintf(" %16s", name))
 
 	if len(logData.File) != 0 {
 		sb.WriteString(fmt.Sprintf(" %s(%d)", logData.File, logData.Line))
 	}
-	sb.WriteString(" " + logData.Message())
+	sb.WriteString(" ")
+	sb.WriteString(logData.Message())
 	sb.WriteString("\x1b[0m")
 	return sb.String()
 }

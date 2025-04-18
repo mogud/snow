@@ -1,6 +1,8 @@
 package logging
 
-import "reflect"
+import (
+	"reflect"
+)
 
 type ILoggerInjector interface {
 	loggerInjectorTag()

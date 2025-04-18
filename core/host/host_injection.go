@@ -1,11 +1,11 @@
 package host
 
 import (
-	"github.com/mogud/snow/core/injection"
-	"github.com/mogud/snow/core/logging"
-	"github.com/mogud/snow/core/logging/handler"
-	"github.com/mogud/snow/core/option"
 	"reflect"
+	"snow/core/injection"
+	"snow/core/logging"
+	"snow/core/logging/handler"
+	"snow/core/option"
 	"strings"
 )
 
@@ -30,7 +30,7 @@ func Inject(scope injection.IRoutineScope, instance any) bool {
 					repo := injection.GetRoutine[*option.Repository](scope.GetRoot().GetProvider())
 					argInstance = repo.GetOptionWrapper(argTy)
 				case argTy.ConvertibleTo(loggerContainerType):
-					ch := injection.GetRoutine[*handler.CompoundHandler](scope.GetRoot().GetProvider())
+					ch := injection.GetRoutine[*handler.RootHandler](scope.GetRoot().GetProvider())
 					argInstance = ch.WrapToContainer(argTy)
 				default:
 					argInstance = scope.GetProvider().GetRoutine(argTy)

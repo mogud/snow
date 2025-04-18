@@ -7,7 +7,7 @@ import (
 
 var kvStore = sync.Map{}
 
-func Set(key string, value interface{}) {
+func Set(key string, value any) {
 	kvStore.Store(key, value)
 }
 

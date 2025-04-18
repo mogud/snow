@@ -1,9 +1,9 @@
 package internal
 
 import (
-	"github.com/mogud/snow/core/host"
-	"github.com/mogud/snow/core/injection"
 	"reflect"
+	"snow/core/host"
+	"snow/core/injection"
 	"sync/atomic"
 )
 
@@ -46,30 +46,27 @@ func (ss *RoutineProvider) GetKeyedRoutine(key any, ty reflect.Type) any {
 		scope = ss.scope
 	}
 
-	for {
-		instance := scope.GetKeyedScopedRoutine(key, ty)
-		if instance != nil {
-			return instance
-		}
+	instance := scope.GetKeyedScopedRoutine(key, ty)
+	if instance != nil {
+		return instance
+	}
 
-		if !atomic.CompareAndSwapInt32(&descriptor.InitLock, 0, 1) {
-			continue
-		}
+	for !atomic.CompareAndSwapInt32(&descriptor.InitLock, 0, 1) {
+	}
 
-		instance = scope.GetKeyedScopedRoutine(key, ty)
-		if instance != nil {
-			atomic.StoreInt32(&descriptor.InitLock, 0)
-			return instance
-		}
-
-		instance = descriptor.Factory(scope)
-
-		host.Inject(scope, instance)
-
-		scope.SetKeyedScopedRoutine(key, ty, instance)
+	instance = scope.GetKeyedScopedRoutine(key, ty)
+	if instance != nil {
 		atomic.StoreInt32(&descriptor.InitLock, 0)
 		return instance
 	}
+
+	instance = descriptor.Factory(scope)
+
+	host.Inject(scope, instance)
+
+	scope.SetKeyedScopedRoutine(key, ty, instance)
+	atomic.StoreInt32(&descriptor.InitLock, 0)
+	return instance
 }
 
 func (ss *RoutineProvider) CreateScope() injection.IRoutineScope {

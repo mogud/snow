@@ -1,15 +1,14 @@
 package internal
 
 import (
-	"context"
-	"github.com/mogud/snow/core/host"
+	"snow/core/host"
+	"sync/atomic"
 )
 
 var _ host.IHostApplication = (*HostApplication)(nil)
 
 type HostApplication struct {
-	ctx               context.Context
-	cancel            func()
+	secondPass        atomic.Int32
 	startedListeners  []func()
 	stoppedListeners  []func()
 	stoppingListeners []func()
@@ -29,14 +28,35 @@ func (ss *HostApplication) OnStopping(listener func()) {
 
 func NewHostApplication() *HostApplication {
 	app := &HostApplication{}
-	app.ctx, app.cancel = context.WithCancel(context.Background())
 	return app
 }
 
-func (ss *HostApplication) StopApplication() {
-	for _, listener := range ss.stoppingListeners {
+func (ss *HostApplication) EmitRoutineStartedSuccess() {
+	for _, listener := range ss.startedListeners {
 		listener()
 	}
 
-	ss.cancel()
+	ss.StopApplication()
+}
+
+func (ss *HostApplication) EmitRoutineStartedFailed() {
+	ss.StopApplication()
+}
+
+func (ss *HostApplication) EmitRoutineStopped() {
+	for _, listener := range ss.stoppedListeners {
+		listener()
+	}
+}
+
+func (ss *HostApplication) StopApplication() {
+	if ss.secondPass.CompareAndSwap(0, 1) {
+		return
+	}
+
+	if ss.secondPass.CompareAndSwap(1, 2) {
+		for _, listener := range ss.stoppingListeners {
+			listener()
+		}
+	}
 }

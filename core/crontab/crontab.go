@@ -2,6 +2,7 @@ package crontab
 
 import (
 	"math"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -14,14 +15,14 @@ type ctDescUnit struct {
 }
 
 type CTDesc struct {
-	year   []*ctDescUnit
-	month  []*ctDescUnit
-	day    []*ctDescUnit
-	week   []*ctDescUnit
-	hour   []*ctDescUnit
-	minute []*ctDescUnit
-	second []*ctDescUnit
-
+	year             []*ctDescUnit
+	month            []*ctDescUnit
+	day              []*ctDescUnit
+	week             []*ctDescUnit
+	hour             []*ctDescUnit
+	minute           []*ctDescUnit
+	second           []*ctDescUnit
+	layoutRegexp     map[string]*regexp.Regexp
 	layoutRegexpLock sync.Mutex
 }
 
@@ -47,6 +48,8 @@ func (ss *CTDesc) init() {
 	if ss.second == nil {
 		ss.second = []*ctDescUnit{{begin: 0, end: 59, step: 1}}
 	}
+
+	ss.layoutRegexp = make(map[string]*regexp.Regexp)
 }
 
 func (ss *CTDesc) normUnit(params []*ctDescUnit, val int) (carry bool, newVal int) {

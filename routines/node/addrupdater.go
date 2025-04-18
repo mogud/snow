@@ -1,21 +1,21 @@
 package node
 
 import (
-	"github.com/mogud/snow/core/task"
+	"snow/core/task"
 	"sync/atomic"
 )
 
 type NodeAddrUpdater struct {
-	naddr   int64
-	updatef func(chan<- *NodeAddr)
+	nAddr   int64
+	updateF func(chan<- *Addr)
 	running int32
 	sigChan chan bool
 }
 
-func NewNodeAddrUpdater(naddr NodeAddr, updateFunc func(chan<- *NodeAddr)) *NodeAddrUpdater {
+func NewNodeAddrUpdater(nAddr Addr, updateFunc func(chan<- *Addr)) *NodeAddrUpdater {
 	return &NodeAddrUpdater{
-		naddr:   int64(naddr),
-		updatef: updateFunc,
+		nAddr:   int64(nAddr),
+		updateF: updateFunc,
 		sigChan: make(chan bool, 1024),
 	}
 }
@@ -31,8 +31,8 @@ func (ss *NodeAddrUpdater) Start() {
 	})
 }
 
-func (ss *NodeAddrUpdater) GetNodeAddr() NodeAddr {
-	return NodeAddr(atomic.LoadInt64(&ss.naddr))
+func (ss *NodeAddrUpdater) GetNodeAddr() Addr {
+	return Addr(atomic.LoadInt64(&ss.nAddr))
 }
 
 func (ss *NodeAddrUpdater) getSigChan() chan<- bool {
@@ -44,13 +44,13 @@ func (ss *NodeAddrUpdater) retryUpdateAddr() {
 		return
 	}
 
-	addrChan := make(chan *NodeAddr, 1)
-	ss.updatef(addrChan)
+	addrChan := make(chan *Addr, 1)
+	ss.updateF(addrChan)
 
 	task.Execute(func() {
-		newaddr := <-addrChan
-		if newaddr != nil {
-			atomic.StoreInt64(&ss.naddr, int64(*newaddr))
+		newAddr := <-addrChan
+		if newAddr != nil {
+			atomic.StoreInt64(&ss.nAddr, int64(*newAddr))
 		}
 		atomic.StoreInt32(&ss.running, 0)
 	})

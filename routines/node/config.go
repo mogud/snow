@@ -1,83 +1,93 @@
 package node
 
 import (
-	"github.com/mogud/snow/core/logging/slog"
+	"fmt"
 	"net"
 	"sort"
+	"strconv"
 )
-
-type nodeElementOption struct {
-	Host     string   `snow:"host"`     // 节点地址
-	Port     int      `snow:"port"`     // 节点端口
-	Order    int      `snow:"order"`    // 节点排序
-	Services []string `snow:"services"` // 具名服务
-}
-
-type NodeBootOption struct {
-	BootName string                        `snow:"boot_name"` // 启动节点名
-	Nodes    map[string]*nodeElementOption `snow:"nodes"`     // 所有节点数据
-}
 
 type nodeInfo struct {
 	Name     string
 	Order    int
-	NodeAddr NodeAddr
+	NodeAddr Addr
 	Services []string
 }
 
-type NodeConfigStruct struct {
-	Nodes       []*nodeInfo
-	CurNode     []string
-	CurNodeMap  map[string]bool
-	CurNodeAddr NodeAddr
-	CurNodePort int
+type nodeConfig struct {
+	Nodes           []*nodeInfo
+	CurNodeServices []string
+	CurNodeMap      map[string]bool
+	CurNodeName     string
+	CurNodeIP       string
+	CurNodePort     int
+	CurNodeHttpPort int
+	CurNodeAddr     Addr
 }
 
-var NodeConfig = &NodeConfigStruct{
+var Config = &nodeConfig{
 	CurNodeMap: map[string]bool{},
 }
 
-func InitOptions(opt *NodeBootOption) {
+func (ss *Node) initOptions(opt *Option, httpPort int) {
+	if len(opt.LocalIP) == 0 {
+		panic("node local ip address empty")
+	}
+
+	var curHost string
+	var curPort int
 	for name, nc := range opt.Nodes {
-		naddr, err := NewNodeAddr(nc.Host, nc.Port)
+		nAddr, err := NewNodeAddr(nc.Host, nc.Port)
 		if err != nil {
-			slog.Fatalf("invalid node(%s) address: %+v", name, err)
+			ss.logger.Fatalf("invalid node(%s) address: %+v", name, err)
 		}
 
-		cfg := &nodeInfo{
+		info := &nodeInfo{
 			Name:     name,
 			Order:    nc.Order,
-			NodeAddr: naddr,
+			NodeAddr: nAddr,
 		}
 		for _, s := range nc.Services {
-			cfg.Services = append(cfg.Services, s)
+			info.Services = append(info.Services, s)
 		}
-		NodeConfig.Nodes = append(NodeConfig.Nodes, cfg)
+		Config.Nodes = append(Config.Nodes, info)
 
 		if name == opt.BootName {
-			NodeConfig.CurNodeAddr = naddr
+			curHost = nc.Host
+			curPort = nc.Port
+			Config.CurNodeName = name
 			for _, s := range nc.Services {
-				if NodeConfig.CurNodeMap[s] {
-					slog.Fatalf("duplicate service(%s) in node(%s) config", s, name)
+				if Config.CurNodeMap[s] {
+					ss.logger.Fatalf("duplicate service(%s) in node(%s) config", s, name)
 				}
 
-				NodeConfig.CurNodeMap[s] = true
-				NodeConfig.CurNode = append(NodeConfig.CurNode, s)
+				Config.CurNodeMap[s] = true
+				Config.CurNodeServices = append(Config.CurNodeServices, s)
 			}
 		}
 	}
-	sort.Slice(NodeConfig.Nodes, func(i, j int) bool {
-		return NodeConfig.Nodes[i].Order < NodeConfig.Nodes[j].Order
+	sort.Slice(Config.Nodes, func(i, j int) bool {
+		return Config.Nodes[i].Order < Config.Nodes[j].Order
 	})
 
-	addr := NodeConfig.CurNodeAddr.String()
-	var err error
-	gNode.listener, err = net.Listen("tcp4", addr)
-	if err != nil {
-		slog.Fatalf("node listen: %+v", err)
+	if len(curHost) == 0 {
+		curHost = opt.LocalIP
 	}
-	laddr := gNode.listener.Addr().(*net.TCPAddr)
-	NodeConfig.CurNodePort = laddr.Port
-	NodeConfig.CurNodeAddr, _ = NewNodeAddr(laddr.IP.String(), laddr.Port)
-	slog.Infof("node tcp listen at %s", laddr)
+
+	var err error
+	gNode.listener, err = net.Listen("tcp4", curHost+":"+strconv.Itoa(curPort))
+	if err != nil {
+		panic(fmt.Sprintf("node listen at port %v failed: %+v", curPort, err))
+	}
+	lAddr := gNode.listener.Addr().(*net.TCPAddr)
+
+	Config.CurNodeIP = opt.LocalIP
+	Config.CurNodePort = lAddr.Port
+	Config.CurNodeHttpPort = httpPort
+	Config.CurNodeAddr, err = NewNodeAddr(opt.LocalIP, lAddr.Port)
+	if err != nil {
+		panic(fmt.Sprintf("invalid node local ip address: %v", err))
+	}
+
+	ss.logger.Infof("node tcp listen at %s, current node address: %v", lAddr.String(), Config.CurNodeAddr.String())
 }
