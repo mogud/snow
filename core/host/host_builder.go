@@ -1,12 +1,12 @@
 package host
 
 import (
+	"github.com/mogud/snow/core/configuration"
+	"github.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/logging/handler/compound"
+	"github.com/mogud/snow/core/option"
 	"reflect"
-	"snow/core/configuration"
-	"snow/core/injection"
-	"snow/core/logging"
-	"snow/core/logging/handler/compound"
-	"snow/core/option"
 )
 
 type IBuilder interface {

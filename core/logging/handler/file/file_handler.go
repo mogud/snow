@@ -2,12 +2,12 @@ package file
 
 import (
 	"fmt"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/maps"
+	"github.com/mogud/snow/core/option"
 	"os"
 	"path"
 	"runtime"
-	"snow/core/logging"
-	"snow/core/maps"
-	"snow/core/option"
 	"sort"
 	"strings"
 	"sync"

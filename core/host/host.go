@@ -1,8 +1,8 @@
 package host
 
 import (
+	"github.com/mogud/snow/core/injection"
 	"reflect"
-	"snow/core/injection"
 )
 
 type IHost interface {

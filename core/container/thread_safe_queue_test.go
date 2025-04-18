@@ -4,8 +4,8 @@
 package container_test
 
 import (
+	"github.com/mogud/snow/core/container"
 	"github.com/stretchr/testify/assert"
-	"snow/core/container"
 	"sync"
 	"testing"
 )

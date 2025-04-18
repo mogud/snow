@@ -1,11 +1,11 @@
 package host
 
 import (
+	"github.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/logging/handler"
+	"github.com/mogud/snow/core/option"
 	"reflect"
-	"snow/core/injection"
-	"snow/core/logging"
-	"snow/core/logging/handler"
-	"snow/core/option"
 	"strings"
 )
 

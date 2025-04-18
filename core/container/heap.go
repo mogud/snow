@@ -1,7 +1,7 @@
 package container
 
 import (
-	"snow/core/constraints"
+	"github.com/mogud/snow/core/constraints"
 )
 
 type Heap[T any] struct {

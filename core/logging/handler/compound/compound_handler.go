@@ -1,9 +1,9 @@
 package compound
 
 import (
-	"snow/core/container"
-	"snow/core/logging"
-	"snow/core/option"
+	"github.com/mogud/snow/core/container"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/option"
 )
 
 var _ logging.ILogHandler = (*Handler)(nil)

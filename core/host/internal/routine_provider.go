@@ -1,9 +1,9 @@
 package internal
 
 import (
+	"github.com/mogud/snow/core/host"
+	"github.com/mogud/snow/core/injection"
 	"reflect"
-	"snow/core/host"
-	"snow/core/injection"
 	"sync/atomic"
 )
 

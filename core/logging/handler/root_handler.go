@@ -1,8 +1,8 @@
 package handler
 
 import (
+	"github.com/mogud/snow/core/logging"
 	"reflect"
-	"snow/core/logging"
 	"unsafe"
 )
 

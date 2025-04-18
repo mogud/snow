@@ -1,6 +1,6 @@
 package configuration
 
-import "snow/core/container"
+import "github.com/mogud/snow/core/container"
 
 var _ IConfigurationBuilder = (*Builder)(nil)
 

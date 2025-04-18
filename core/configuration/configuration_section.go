@@ -1,8 +1,8 @@
 package configuration
 
 import (
-	"snow/core/container"
-	"snow/core/notifier"
+	"github.com/mogud/snow/core/container"
+	"github.com/mogud/snow/core/notifier"
 )
 
 var _ IConfigurationSection = (*Section)(nil)

@@ -15,12 +15,12 @@ import (
 	"time"
 	"unsafe"
 
-	"snow/core/container"
-	"snow/core/host"
-	"snow/core/logging"
-	"snow/core/option"
-	sync2 "snow/core/sync"
-	"snow/core/task"
+	"github.com/mogud/snow/core/container"
+	"github.com/mogud/snow/core/host"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/option"
+	sync2 "github.com/mogud/snow/core/sync"
+	"github.com/mogud/snow/core/task"
 
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"

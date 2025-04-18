@@ -1,8 +1,8 @@
 package container
 
 import (
+	"github.com/mogud/snow/core/constraints"
 	"math/rand"
-	"snow/core/constraints"
 )
 
 var _ = Iterator[struct{}]((List[struct{}])(nil))

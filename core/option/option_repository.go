@@ -1,8 +1,8 @@
 package option
 
 import (
+	"github.com/mogud/snow/core/configuration"
 	"reflect"
-	"snow/core/configuration"
 	"unsafe"
 )
 

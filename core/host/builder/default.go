@@ -1,17 +1,17 @@
 package builder
 
 import (
-	"snow/core/configuration"
-	"snow/core/host"
-	"snow/core/host/internal"
-	"snow/core/injection"
-	"snow/core/logging"
-	"snow/core/logging/handler"
-	"snow/core/logging/handler/compound"
-	"snow/core/logging/handler/console"
-	"snow/core/logging/handler/file"
-	"snow/core/logging/slog"
-	"snow/core/option"
+	"github.com/mogud/snow/core/configuration"
+	"github.com/mogud/snow/core/host"
+	"github.com/mogud/snow/core/host/internal"
+	"github.com/mogud/snow/core/injection"
+	"github.com/mogud/snow/core/logging"
+	"github.com/mogud/snow/core/logging/handler"
+	"github.com/mogud/snow/core/logging/handler/compound"
+	"github.com/mogud/snow/core/logging/handler/console"
+	"github.com/mogud/snow/core/logging/handler/file"
+	"github.com/mogud/snow/core/logging/slog"
+	"github.com/mogud/snow/core/option"
 )
 
 var _ host.IBuilder = (*DefaultBuilder)(nil)

@@ -5,12 +5,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/mogud/snow/core/task"
 	"io"
 	"net/http"
 	"net/url"
 	"reflect"
 	"runtime/debug"
-	"snow/core/task"
 	"time"
 )
 

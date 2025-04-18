@@ -2,9 +2,9 @@ package file
 
 import (
 	"fmt"
+	"github.com/mogud/snow/core/task"
 	"os"
 	"path"
-	"snow/core/task"
 )
 
 type writerElement struct {

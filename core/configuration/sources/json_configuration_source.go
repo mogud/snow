@@ -3,10 +3,10 @@ package sources
 import (
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/mogud/snow/core/configuration"
+	"github.com/mogud/snow/core/container"
 	stripjsoncomments "github.com/trapcodeio/go-strip-json-comments"
 	"log"
-	"snow/core/configuration"
-	"snow/core/container"
 )
 
 var _ configuration.IConfigurationSource = (*JsonConfigurationSource)(nil)
