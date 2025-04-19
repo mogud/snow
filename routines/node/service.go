@@ -7,11 +7,9 @@ import (
 	"github.com/mogud/snow/core/logging"
 	"github.com/mogud/snow/core/task"
 	"github.com/mogud/snow/core/ticker"
-	http2 "github.com/mogud/snow/routines/http"
 	"github.com/valyala/fasthttp"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -48,22 +46,22 @@ type Service struct {
 	msgChan  chan *message
 	funcChan chan *tagFunc
 
-	nowNs       int64
-	timeWheel   *timeWheel
-	delayedRPCs []func()
-	allowedRPCs map[string]bool
-	logName     string
-	loggerPath  string
-	logger      logging.ILogger
-	load        int64
+	nowNs           int64
+	timeWheel       *timeWheel
+	delayedRpc      []func()
+	allowedRpc      map[string]bool
+	delayedHttpRpc  []chan struct{}
+	httpRpcLock     sync.Mutex
+	httpForwardAddr []int32
+
+	loggerPath string
+	logger     logging.ILogger
 
 	closedLock int32
 	wg         *sync.WaitGroup
 
+	load   int64
 	sMeter IProxy
-
-	httpServer *http2.Server
-	httpPort   int
 }
 
 func (ss *Service) Start(_ any) {
@@ -79,7 +77,7 @@ func (ss *Service) Entry(ctx IRpcContext, funcName string, argGetter func(ft ref
 	f := ss.methodMap[funcName]
 	args, err := argGetter(f.Type())
 	if err != nil {
-		ss.Errorf("doDispatch: get args error: %+v  name = %v", err, funcName)
+		ss.Errorf("doDispatch: get args error: %+v name = %v", err, funcName)
 		return nil
 	}
 	rArgs := []reflect.Value{reflect.ValueOf(ss.realSrv), reflect.ValueOf(ctx)}
@@ -89,10 +87,9 @@ func (ss *Service) Entry(ctx IRpcContext, funcName string, argGetter func(ft ref
 }
 
 // Construct 注入构造函数
-func (ss *Service) Construct(logger *logging.Logger[Service], httpServer *http2.Server) {
-	ss.httpServer = httpServer
+func (ss *Service) Construct(logger *logging.Logger[Service]) {
 	ss.logger = logger.Get(func(data *logging.LogData) {
-		data.Name = "*" + ss.GetName()
+		data.Name = "*" + ss.name
 		data.ID = fmt.Sprintf("%X", unsafe.Pointer(ss))
 		data.Path = ss.loggerPath
 	})
@@ -131,54 +128,42 @@ func (ss *Service) SetChannelSize(size int) {
 // SetAllowedRPC 设置允许调用的 RPC 函数，不含 "Rpc" 头，非线程安全
 func (ss *Service) SetAllowedRPC(names []string) {
 	for _, n := range names {
-		ss.allowedRPCs[n] = true
+		ss.allowedRpc[n] = true
 	}
 }
 
-// EnableRPC 设置 RPC 可用，此时队列中的 RPC 会开始执行，非线程安全
-func (ss *Service) EnableRPC() {
-	for _, f := range ss.delayedRPCs {
+// EnableRpc 设置 RPC 可用，此时队列中的 RPC 会开始执行，非线程安全
+func (ss *Service) EnableRpc() {
+	for _, f := range ss.delayedRpc {
 		f()
 	}
-	ss.allowedRPCs = nil
-	ss.delayedRPCs = nil
+	ss.allowedRpc = nil
+	ss.delayedRpc = nil
 }
 
-// EnableHttpRPC 设置 HTTP RPC 可用，此时队列中的 RPC 会开始执行，非线程安全
-func (ss *Service) EnableHttpRPC() {
-	if ss.httpServer == nil {
-		ss.Fatalf("no http server found in host")
-		return
-	}
+// EnableHttpRpc 设置 HTTP RPC 可用，此时队列中的 RPC 会开始执行，非线程安全
+func (ss *Service) EnableHttpRpc() {
+	var delayedRpc []chan struct{}
+	ss.httpRpcLock.Lock()
+	delayedRpc = ss.delayedHttpRpc
+	ss.delayedHttpRpc = nil
+	ss.httpRpcLock.Unlock()
 
-	path := ss.getHttpPath()
-	ss.httpServer.HandleRequest(path, func(ctx *fasthttp.RequestCtx) {
-		handleHttpRpc(ss, ctx)
-	})
+	for _, ch := range delayedRpc {
+		close(ch)
+	}
 }
 
 // EnableHttpRPCForward 设置 HTTP RPC 转发可用，此时队列中的 RPC 会开始执行转发，非线程安全
 func (ss *Service) EnableHttpRPCForward(srvAddresses []int32) {
-	if ss.httpServer == nil {
-		ss.Fatalf("no http server found in host")
-		return
-	}
-
 	if len(srvAddresses) == 0 {
 		ss.Fatalf("empty forward services")
 		return
 	}
 
-	path := ss.getHttpPath()
-	ss.httpServer.HandleRequest(path, func(ctx *fasthttp.RequestCtx) {
-		srv := nodeGetService(srvAddresses[rand.Intn(len(srvAddresses))])
-		if srv == nil {
-			ctx.Error("invalid service address", http.StatusInternalServerError)
-			return
-		}
+	ss.httpForwardAddr = srvAddresses
 
-		handleHttpRpc(srv, ctx)
-	})
+	ss.EnableHttpRpc()
 }
 
 // Fork 将函数放入主线程并在下一帧中执行，线程安全
@@ -237,21 +222,23 @@ func (ss *Service) CreateEmptyProxy() IProxy {
 	return dumbProxyObj
 }
 
-// CreateProxy 根据服务名以及在配置中的顺序依次在配置的当前节点及其他节点查询并创建代理，线程安全
-func (ss *Service) CreateProxy(name string) IProxy {
-	kind := gNode.name2Info[name].Kind
-	return newServiceProxy(ss, nil, addrAutoSearch, -kind)
-}
-
 // CreateProxyByNodeKind 根据节点地址及服务名创建代理，线程安全
 func (ss *Service) CreateProxyByNodeKind(nAddr INodeAddr, name string) IProxy {
 	kind := gNode.name2Info[name].Kind
-	return newServiceProxy(ss, nil, nAddr.(Addr), -kind)
+	p := newServiceProxy(ss, nil, nAddr.(Addr), -kind)
+	if p == nil {
+		ss.Errorf("[CreateProxyByNodeKind] create tcp proxy but no service(%v) found available", name)
+	}
+	return p
 }
 
 // CreateProxyByNodeAddr 根据节点地址及服务地址创建代理，线程安全
 func (ss *Service) CreateProxyByNodeAddr(nAddr INodeAddr, sAddr int32) IProxy {
-	return newServiceProxy(ss, nil, nAddr.(Addr), sAddr)
+	p := newServiceProxy(ss, nil, nAddr.(Addr), sAddr)
+	if p == nil {
+		ss.Errorf("[CreateProxyByNodeAddr] create tcp proxy but no service(%v-%v) found available", nAddr, sAddr)
+	}
+	return p
 }
 
 // Deprecated: 废弃，未来移除
@@ -260,9 +247,53 @@ func (ss *Service) CreateProxyByUpdaterKind(nAddrUpdater *NodeAddrUpdater, name 
 	return newServiceProxy(ss, nAddrUpdater, AddrLocal, -kind)
 }
 
+// CreateTcpProxy 根据服务名以及在配置中的顺序依次在配置的当前节点及其他节点查询并创建代理，线程安全
+func (ss *Service) CreateTcpProxy(name string) IProxy {
+	kind := gNode.name2Info[name].Kind
+	p := newServiceProxy(ss, nil, addrAutoSearch, -kind)
+	if p == nil {
+		ss.Errorf("[CreateTcpProxy] create http proxy but no service(%v) found available", name)
+	}
+	return p
+}
+
 // CreateHttpProxy 创建 HTTP 代理，线程安全
-func (ss *Service) CreateHttpProxy(url string, name string) IProxy {
-	return newHttpProxy(ss, url, name)
+func (ss *Service) CreateHttpProxy(name string) IProxy {
+	p := newHttpProxy(ss, name)
+	if p == nil {
+		ss.Errorf("[CreateHttpProxy] create tcp proxy but no service(%v) found available", name)
+	}
+	return p
+}
+
+// CreateTcpPriorProxy 创建 Tcp 代理，若不存在则创建 Http 代理，线程安全
+func (ss *Service) CreateTcpPriorProxy(name string) IProxy {
+	kind := gNode.name2Info[name].Kind
+	p := IProxy(newServiceProxy(ss, nil, addrAutoSearch, -kind))
+	if p != nil {
+		return p
+	}
+
+	p = newHttpProxy(ss, name)
+	if p == nil {
+		ss.Errorf("[CreateTcpPriorProxy] create http proxy but no service(%v) found available", name)
+	}
+	return p
+}
+
+// CreateHttpPriorProxy 创建 Http 代理，若不存在则创建 Tcp 代理，线程安全
+func (ss *Service) CreateHttpPriorProxy(name string) IProxy {
+	p := IProxy(newHttpProxy(ss, name))
+	if p != nil {
+		return p
+	}
+
+	kind := gNode.name2Info[name].Kind
+	p = newServiceProxy(ss, nil, addrAutoSearch, -kind)
+	if p == nil {
+		ss.Errorf("[CreateHttpPriorProxy] create http proxy but no service(%v) found available", name)
+	}
+	return p
 }
 
 // RpcStatus 获取服务状态 RPC 的默认实现
@@ -318,11 +349,12 @@ func (ss *Service) init(name string, kind int32, sAddr int32, chanSize int, real
 		queue:  &timerQueue{},
 		timeMs: time.Now().UnixMilli(),
 	}
-	ss.delayedRPCs = make([]func(), 0, 4)
-	ss.allowedRPCs = make(map[string]bool)
+	ss.delayedRpc = make([]func(), 0, 4)
+	ss.allowedRpc = make(map[string]bool)
+	ss.delayedHttpRpc = make([]chan struct{}, 0, 4)
 
 	if _, ok := Config.CurNodeMap["Metric"]; ok {
-		ss.sMeter = ss.CreateProxy("Metric")
+		ss.sMeter = ss.CreateTcpProxy("Metric")
 	} else {
 		ss.sMeter = ss.CreateEmptyProxy()
 	}
@@ -461,7 +493,16 @@ func (ss *Service) stop() {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	ss.Fork("service.stop", func() {
-		ss.realSrv.Stop(wg)
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					buf := debug.StackInfo()
+					ss.Errorf("service 'Stop' execute error: %v\n%s", err, buf)
+				}
+			}()
+			ss.realSrv.Stop(wg)
+		}()
+
 		wg.Done()
 	})
 	wg.Wait()
@@ -530,7 +571,7 @@ func (ss *Service) doDispatch(mReq *message) {
 
 	mRsp := &message{
 		nAddr: mReq.nAddr,
-		src:   ss.GetAddr(),
+		src:   ss.sAddr,
 		dst:   mReq.src,
 		sess:  -mReq.sess,
 		trace: mReq.trace,
@@ -543,21 +584,16 @@ func (ss *Service) doDispatch(mReq *message) {
 	}
 
 	ctx := newRpcContext(ss, mRsp, mReq, cb)
-	if ss.delayedRPCs == nil || ss.allowedRPCs[funcName] {
+	if ss.delayedRpc == nil || ss.allowedRpc[funcName] {
 		ss.entry(ctx, funcName, mReq.getRequestFuncArgs)
 	} else {
 		ss.delayEntry(ctx, funcName, mReq.getRequestFuncArgs)
 	}
 }
 
-func (ss *Service) getHttpPath() string {
-	res, _ := url.JoinPath(httpRpcPathPrefix, ss.GetName())
-	return res
-}
-
 func (ss *Service) delayEntry(ctx IRpcContext, funcName string, argGetter func(ft reflect.Type) ([]reflect.Value, error)) {
 	if f := ss.realSrv.Entry(ctx, funcName, argGetter); f != nil {
-		ss.delayedRPCs = append(ss.delayedRPCs, f)
+		ss.delayedRpc = append(ss.delayedRpc, f)
 	}
 }
 
@@ -567,7 +603,51 @@ func (ss *Service) entry(ctx IRpcContext, funcName string, argGetter func(ft ref
 	}
 }
 
-func handleHttpRpc(srv *Service, ctx *fasthttp.RequestCtx) {
+func (ss *Service) handleHttpRpc(ctx *fasthttp.RequestCtx) {
+	ss.httpRpcLock.Lock()
+	if ss.delayedHttpRpc == nil {
+		ss.httpRpcLock.Unlock()
+		ss.httpEntry(ctx)
+		return
+	}
+
+	ch := make(chan struct{})
+	ss.delayedHttpRpc = append(ss.delayedHttpRpc, ch)
+	ss.httpRpcLock.Unlock()
+
+	select {
+	case <-ch:
+	case <-time.After(30 * time.Second):
+		res, err := jsoniter.MarshalToString(&httpResponse{
+			StatusCode: http.StatusRequestTimeout,
+			Result:     jsoniter.RawMessage("no response from remote service, is 'EnableHttpRpc' called?"),
+		})
+		if err != nil {
+			ctx.Error("http rpc response marshal error", http.StatusInternalServerError)
+			return
+		}
+
+		ctx.SuccessString("application/json", res)
+		return
+	}
+	ss.httpEntry(ctx)
+}
+
+func (ss *Service) httpEntry(ctx *fasthttp.RequestCtx) {
+	if len(ss.httpForwardAddr) == 0 {
+		processHttpRpc(ss, ctx)
+	} else {
+		srv := nodeGetService(ss.httpForwardAddr[rand.Intn(len(ss.httpForwardAddr))])
+		if srv == nil {
+			ctx.Error("invalid service address", http.StatusInternalServerError)
+			return
+		}
+
+		processHttpRpc(srv, ctx)
+	}
+}
+
+func processHttpRpc(srv *Service, ctx *fasthttp.RequestCtx) {
 	var hc httpRequest
 	if err := jsoniter.Unmarshal(ctx.Request.Body(), &hc); err != nil {
 		ctx.Error("invalid http rpc structure", http.StatusBadRequest)

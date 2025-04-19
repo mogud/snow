@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	http2 "github.com/mogud/snow/routines/http"
+	"github.com/valyala/fasthttp"
 	"io"
 	"math"
 	"net"
+	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -28,16 +30,21 @@ import (
 )
 
 type nodeElementOption struct {
-	Host     string   `snow:"Host"`     // 节点地址
-	Port     int      `snow:"Port"`     // 节点端口
-	Order    int      `snow:"Order"`    // 节点排序
-	Services []string `snow:"Services"` // 具名服务
+	Order    int      `snow:"Order"`    // 节点顺序，节点服务的查找按 Order 值从小到大依次进行
+	Host     string   `snow:"Host"`     // 节点主机名，可以是 IP，若当前节点的 Host 为空，则节点 Tcp 监听 LocalIP
+	Port     int      `snow:"Port"`     // 节点 Tcp 端口
+	HttpPort int      `snow:"HttpPort"` // 节点 Http 端口
+	UseHttps bool     `snow:"UseHttps"` // 节点是否为 Https
+	Services []string `snow:"Services"` // 节点包含的服务，若为当前节点则代表要启动的服务；服务按照顺序启动，逆序关闭
 }
 
 type Option struct {
-	LocalIP  string                        `snow:"LocalIP"`  // 内网 ip，用于判断 RPC 连接是否是本地
-	BootName string                        `snow:"BootName"` // 启动节点名
-	Nodes    map[string]*nodeElementOption `snow:"Nodes"`    // 当前关注的节点信息
+	LocalIP              string                        `snow:"LocalIP"`              // 内网 ip，用于判断 RPC 连接是否是本地
+	HttpKeepAliveSeconds int                           `snow:"HttpKeepAliveSeconds"` // 节点 Http 服务保活时间
+	HttpTimeoutSeconds   int                           `snow:"HttpTimeoutSeconds"`   // 节点 Http 服务超时时间
+	HttpDebug            bool                          `snow:"HttpDebug"`            // 节点 Http 是否为调试模式
+	BootName             string                        `snow:"BootName"`             // 启动节点名
+	Nodes                map[string]*nodeElementOption `snow:"Nodes"`                // 当前关注的节点信息
 }
 
 type RegisterOption struct {
@@ -84,27 +91,28 @@ type Node struct {
 	name2Info      map[string]*ServiceRegisterInfo
 	name2Addr      map[string]int32
 
-	sessID        int32
-	sAddr         int32
+	sessID int32
+	sAddr  int32
+
 	proto         map[int32]reflect.Type
 	methodMap     map[int32]map[string]reflect.Value
 	httpMethodMap map[int32]map[string]reflect.Value
 	services      map[int32]*Service
 	handle        map[Addr]*remoteHandle // node address: handle
-	listener      net.Listener
+	httpHandlers  map[string]fasthttp.RequestHandler
+
+	tcpListener  net.Listener
+	httpListener net.Listener
 
 	ctx    context.Context
 	cancel func()
 
 	closeWait *sync.WaitGroup
-
-	httpServer *http2.Server
 }
 
-func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt *option.Option[*Option], registerOpt *option.Option[*RegisterOption], httpServer *http2.Server) {
+func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt *option.Option[*Option], registerOpt *option.Option[*RegisterOption]) {
 	ss.regOpt = registerOpt.Get()
 
-	ss.httpServer = httpServer
 	ss.nodeScope = host.GetRoutineProvider().GetRootScope()
 	ss.chPreprocessor = ss.regOpt.ClientHandlePreprocessor
 	ss.shPreprocessor = ss.regOpt.ServerHandlePreprocessor
@@ -125,6 +133,7 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt
 	ss.httpMethodMap = make(map[int32]map[string]reflect.Value)
 	ss.services = make(map[int32]*Service)
 	ss.handle = make(map[Addr]*remoteHandle) // node address: handle
+	ss.httpHandlers = make(map[string]fasthttp.RequestHandler)
 
 	ss.ctx, ss.cancel = context.WithCancel(context.Background())
 
@@ -212,47 +221,45 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt
 func (ss *Node) Start(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	wg.Add(1)
 
-	ss.httpServer.AddWhiteListIP("127.0.0.1")
-	ss.httpServer.AddWhiteListIP(ss.nodeOpt.LocalIP)
-	ss.httpServer.OnReady(func() {
-		task.Execute(func() {
-			httpPort := ss.httpServer.GetPort()
+	ss.initOptions(ss.nodeOpt)
 
-			ss.initOptions(ss.nodeOpt, httpPort)
+	if ss.regOpt.PostInitializer != nil {
+		ss.regOpt.PostInitializer()
+	}
 
-			if ss.regOpt.PostInitializer != nil {
-				ss.regOpt.PostInitializer()
-			}
-
-			var services []*container.Pair[string, int32]
-			for _, sn := range Config.CurNodeServices {
-				sAddr, err := newService(sn, 204800)
-				if err != nil {
-					ss.logger.Fatalf("create service(%s) error: %+v", sn, err)
-				}
-				ss.name2Addr[sn] = sAddr
-				services = append(services, &container.Pair[string, int32]{
-					First:  sn,
-					Second: sAddr,
-				})
-			}
-
-			task.Execute(func() {
-				for _, service := range services {
-					sn, sAddr := service.First, service.Second
-					if !StartService(sAddr, nil) {
-						ss.logger.Fatalf("start service(%s:%#8x) failed", sn, sAddr)
-					}
-				}
-
-				wg.Done()
-
-				ss.logger.Infof("%v services started", len(services))
-			})
-
-			task.Execute(ss.nodeStartListen)
+	var services []*container.Pair[string, int32]
+	for _, sn := range Config.CurNodeServices {
+		sAddr, err := newService(sn, 204800)
+		if err != nil {
+			ss.logger.Fatalf("create service(%s) error: %+v", sn, err)
+		}
+		ss.name2Addr[sn] = sAddr
+		services = append(services, &container.Pair[string, int32]{
+			First:  sn,
+			Second: sAddr,
 		})
+
+		s := nodeGetService(sAddr)
+		path, _ := url.JoinPath(httpRpcPathPrefix, sn)
+		ss.handleRequestMethod(path, http.MethodPost, s.handleHttpRpc)
+	}
+
+	ss.postInitOptions()
+
+	task.Execute(func() {
+		for _, service := range services {
+			sn, sAddr := service.First, service.Second
+			if !StartService(sAddr, nil) {
+				ss.logger.Fatalf("start service(%s:%#8x) failed", sn, sAddr)
+			}
+		}
+
+		wg.Done()
+
+		ss.logger.Infof("%v services started", len(services))
 	})
+
+	task.Execute(ss.nodeStartListen)
 }
 
 func (ss *Node) Stop(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
@@ -272,7 +279,8 @@ func (ss *Node) Stop(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 		}
 	}
 
-	_ = gNode.listener.Close()
+	_ = gNode.tcpListener.Close()
+	_ = gNode.httpListener.Close()
 
 	gNode.Lock()
 	for _, h := range gNode.handle {
@@ -365,11 +373,11 @@ func nodeGetService(sAddr int32) *Service {
 
 func (ss *Node) nodeStartListen() {
 	defer func() {
-		_ = gNode.listener.Close()
+		_ = gNode.tcpListener.Close()
 	}()
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
-		conn, err := ss.listener.Accept()
+		conn, err := ss.tcpListener.Accept()
 		if err != nil {
 			select {
 			case <-ss.ctx.Done():

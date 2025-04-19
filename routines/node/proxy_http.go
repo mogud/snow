@@ -35,7 +35,34 @@ type httpProxy struct {
 	httpClient *http.Client
 }
 
-func newHttpProxy(srv *Service, urlBase string, name string) *httpProxy {
+func newHttpProxy(srv *Service, name string) *httpProxy {
+	var urlBase string
+	if Config.CurNodeMap[name] {
+		urlBase = fmt.Sprintf("http://%s:%v", Config.CurNodeIP, Config.CurNodeHttpPort)
+	} else {
+	loop:
+		for _, ni := range Config.Nodes {
+			if ni.Name == Config.CurNodeName {
+				continue
+			}
+
+			for _, n := range ni.Services {
+				if n == name && len(ni.Host) > 0 && ni.HttpPort > 0 {
+					protocol := "http"
+					if ni.UseHttps {
+						protocol = "https"
+					}
+					urlBase = fmt.Sprintf("%v://%s:%v", protocol, ni.Host, ni.HttpPort)
+					break loop
+				}
+			}
+		}
+	}
+
+	if len(urlBase) == 0 {
+		return nil
+	}
+
 	// TODO by mogu: Golang HTTP2 有 bug，会导致超时访问，使用 HTTP1 可以绕过
 	tr := &http.Transport{}
 	tr.TLSClientConfig = &tls.Config{
@@ -123,7 +150,9 @@ func (ss *httpProxy) prepareThen(p *promise, resp *http.Response) {
 
 	fv := reflect.ValueOf(p.successCb[0])
 	if !fv.IsValid() {
-		ss.onError(p, fmt.Errorf("invalid Then callback"))
+		if p.finalCb != nil {
+			ss.srv.Fork("httpProxy.post.finalCb", p.finalCb)
+		}
 		return
 	}
 
@@ -148,7 +177,11 @@ func (ss *httpProxy) prepareThen(p *promise, resp *http.Response) {
 
 	rArgs := make([]reflect.Value, len(resArgs))
 	for i, v := range resArgs {
-		rArgs[i] = reflect.ValueOf(v).Elem()
+		if v == nil {
+			rArgs[i] = reflect.Zero(ft.In(i))
+		} else {
+			rArgs[i] = reflect.ValueOf(v).Elem()
+		}
 	}
 
 	ss.callThen(p, ft, fv, rArgs)
@@ -171,6 +204,7 @@ func (ss *httpProxy) callThen(p *promise, ft reflect.Type, fv reflect.Value, rAr
 				ss.srv.Errorf("httpRpc(%s) response got panic: %v", p.fName, string(debug.Stack()))
 			}
 		}()
+
 		fret := fv.Call(rArgs)
 		for len(p.successCb) > 0 {
 			if ft.NumOut() == 1 && ft.Out(0) == reflect.TypeOf((*IPromise)(nil)).Elem() {

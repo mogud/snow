@@ -120,10 +120,6 @@ type serviceProxy struct {
 	buffer       []*promise
 }
 
-func newEmptyServiceProxy() *serviceProxy {
-	return &serviceProxy{}
-}
-
 func newServiceProxy(srv *Service, updater *NodeAddrUpdater, nAddr Addr, sAddr int32) *serviceProxy {
 	if nAddr.IsLocalhost() || nAddr == Config.CurNodeAddr {
 		nAddr = AddrLocal
@@ -143,7 +139,7 @@ func newServiceProxy(srv *Service, updater *NodeAddrUpdater, nAddr Addr, sAddr i
 				}
 
 				for _, n := range ni.Services {
-					if n == name {
+					if n == name && len(ni.Host) > 0 && ni.Port > 0 {
 						nAddr = ni.NodeAddr
 						break loop
 					}
@@ -151,8 +147,8 @@ func newServiceProxy(srv *Service, updater *NodeAddrUpdater, nAddr Addr, sAddr i
 			}
 		}
 
-		if nAddr == AddrInvalid {
-			srv.Fatalf("service (%s) not found in current node configuration", name)
+		if nAddr == addrAutoSearch {
+			return nil
 		}
 	}
 
