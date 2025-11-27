@@ -1,7 +1,7 @@
 package logging
 
 import (
-	"fmt"
+	"log"
 	"time"
 )
 
@@ -31,5 +31,5 @@ type simpleLogHandler struct {
 }
 
 func (s simpleLogHandler) Log(data *LogData) {
-	fmt.Println(DefaultLogFormatter(data))
+	log.Println(DefaultLogFormatter(data))
 }

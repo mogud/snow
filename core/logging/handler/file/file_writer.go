@@ -1,8 +1,12 @@
 package file
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/klauspost/compress/zstd"
 	"github.com/mogud/snow/core/task"
+	"io"
+	"log"
 	"os"
 	"path"
 )
@@ -13,12 +17,15 @@ type writerElement struct {
 }
 
 type writer struct {
+	compress bool
 	fileName string
 	file     *os.File
 }
 
-func newWriter(c <-chan *writerElement) *writer {
-	w := &writer{}
+func newWriter(c <-chan *writerElement, compress bool) *writer {
+	w := &writer{
+		compress: compress,
+	}
 	task.Execute(func() { w.loop(c) })
 	return w
 }
@@ -40,7 +47,7 @@ func (ss *writer) loop(c <-chan *writerElement) {
 
 		f, err := os.OpenFile(unit.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			fmt.Printf("### ERROR ### log to file <%s>: %s\n", unit.File, err.Error())
+			log.Printf("### ERROR ### log to file <%s>: %s", unit.File, err.Error())
 			continue
 		}
 
@@ -48,9 +55,51 @@ func (ss *writer) loop(c <-chan *writerElement) {
 			_ = ss.file.Close()
 		}
 
-		fmt.Printf("### NOTICE ### create log file <%s>\n", unit.File)
+		log.Printf("### NOTICE ### create log file <%s>", unit.File)
 		ss.file = f
-		ss.fileName = unit.File
 		_, _ = fmt.Fprintln(f, unit.Message)
+
+		previousName := ss.fileName
+
+		ss.fileName = unit.File
+
+		if !ss.compress || len(ss.fileName) == 0 {
+			continue
+		}
+
+		dataToCompress, err := os.ReadFile(previousName)
+		if err != nil {
+			log.Printf("### ERROR ### compress process read file <%s>: %s", previousName, err.Error())
+			continue
+		}
+
+		zipFile, err := os.OpenFile(previousName+".zst", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Printf("### ERROR ### compress process create file <%s>: %s", previousName, err.Error())
+			continue
+		}
+
+		err = compress(bytes.NewReader(dataToCompress), zipFile)
+		_ = zipFile.Close()
+
+		if err != nil {
+			log.Printf("### ERROR ### compress process <%s>: %s", previousName, err.Error())
+			continue
+		}
+
+		_ = os.Remove(previousName)
 	}
+}
+
+func compress(in io.Reader, out io.Writer) error {
+	enc, err := zstd.NewWriter(out)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(enc, in)
+	if err != nil {
+		_ = enc.Close()
+		return err
+	}
+	return enc.Close()
 }

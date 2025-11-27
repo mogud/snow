@@ -14,93 +14,6 @@ var (
 	ErrRequestTimeoutLocal  = fmt.Errorf("session timeout from local")
 )
 
-var (
-	dumbPromiseObj = iPromise((*dumbPromise)(nil))
-	dumbProxyObj   = &serviceProxy{}
-)
-
-type iPromise interface {
-	IPromise
-
-	setCallBacks(successCb []any, errCb func(error), finalCb func())
-}
-
-type dumbPromise struct {
-}
-
-func (ss *dumbPromise) Then(_ any) IPromise {
-	return ss
-}
-
-func (ss *dumbPromise) Catch(_ func(error)) IPromise {
-	return ss
-}
-
-func (ss *dumbPromise) Final(_ func()) IPromise {
-	return ss
-}
-
-func (ss *dumbPromise) Timeout(_ time.Duration) IPromise {
-	return ss
-}
-
-func (ss *dumbPromise) Done() {
-}
-
-func (ss *dumbPromise) setCallBacks(_ []any, _ func(error), _ func()) {
-}
-
-var _ iPromise = (*promise)(nil)
-
-type promise struct {
-	proxy     iProxy
-	fName     string
-	timeout   time.Duration
-	args      []any
-	successCb []any
-	errCb     func(error)
-	finalCb   func()
-}
-
-func newPromise(proxy iProxy, fName string, args []any) *promise {
-	return &promise{
-		proxy:   proxy,
-		fName:   fName,
-		timeout: -1,
-		args:    args,
-	}
-}
-
-func (ss *promise) Then(f any) IPromise {
-	ss.successCb = append(ss.successCb, f)
-	return ss
-}
-
-func (ss *promise) Catch(f func(error)) IPromise {
-	ss.errCb = f
-	return ss
-}
-
-func (ss *promise) Final(f func()) IPromise {
-	ss.finalCb = f
-	return ss
-}
-
-func (ss *promise) Timeout(timeout time.Duration) IPromise {
-	ss.timeout = timeout
-	return ss
-}
-
-func (ss *promise) Done() {
-	ss.proxy.doCall(ss)
-}
-
-func (ss *promise) setCallBacks(successCb []any, errCb func(error), finalCb func()) {
-	ss.successCb = successCb
-	ss.errCb = errCb
-	ss.finalCb = finalCb
-}
-
 type iProxy interface {
 	IProxy
 
@@ -112,7 +25,7 @@ var _ = iProxy((*serviceProxy)(nil))
 type serviceProxy struct {
 	srv          *Service
 	nAddr        Addr
-	nAddrUpdater *NodeAddrUpdater
+	nAddrUpdater *AddrUpdater
 	sAddr        int32
 	sender       iMessageSender
 
@@ -120,49 +33,9 @@ type serviceProxy struct {
 	buffer       []*promise
 }
 
-func newServiceProxy(srv *Service, updater *NodeAddrUpdater, nAddr Addr, sAddr int32) *serviceProxy {
-	if nAddr.IsLocalhost() || nAddr == Config.CurNodeAddr {
-		nAddr = AddrLocal
-	}
-
-	// 根据节点列表自动查找指定类型的服务
-	if nAddr == addrAutoSearch && sAddr < 0 {
-		kind := -sAddr
-		name := gNode.kind2Info[kind].Name
-		if Config.CurNodeMap[name] {
-			nAddr = AddrLocal
-		} else {
-		loop:
-			for _, ni := range Config.Nodes {
-				if ni.Name == Config.CurNodeName {
-					continue
-				}
-
-				for _, n := range ni.Services {
-					if n == name && len(ni.Host) > 0 && ni.Port > 0 {
-						nAddr = ni.NodeAddr
-						break loop
-					}
-				}
-			}
-		}
-
-		if nAddr == addrAutoSearch {
-			return nil
-		}
-	}
-
-	return &serviceProxy{
-		srv:          srv,
-		nAddr:        nAddr,
-		nAddrUpdater: updater,
-		sAddr:        sAddr,
-	}
-}
-
 func (ss *serviceProxy) Call(fName string, args ...any) IPromise {
 	if ss.sAddr == 0 {
-		return dumbPromiseObj
+		return (*dumbPromise)(nil)
 	}
 
 	return newPromise(ss, fName, args)
@@ -225,28 +98,43 @@ func (ss *serviceProxy) doCall(p *promise) {
 			srv.Errorf("rpc(%s) uncatched error: %+v", p.fName, ErrServiceNotExist)
 		}
 		if p.finalCb != nil {
-			srv.Fork("proxy.err.finalCb", p.finalCb)
+			srv.Fork("proxy.err.finalCb", func() {
+				p.finalCb()
+				p.clear()
+			})
+		} else {
+			p.clear()
 		}
+		m.clear()
 		return
 	}
 
-	if len(p.successCb) == 0 {
+	if p.successCb == nil {
 		if p.finalCb != nil {
-			srv.Fork("proxy.post.finalCb", p.finalCb)
+			srv.Fork("proxy.post.finalCb", func() {
+				p.finalCb()
+				p.clear()
+			})
+		} else {
+			p.clear()
 		}
 	} else {
-		m.sess = nodeGenSessionID()
-		m.cb = func(mm *message) {
-			ss.callThen(mm, srv, p, m.sess)
+		sess := nodeGenSessionID()
+		trace := m.trace
+		cb := func(mm *message) {
+			ss.callThen(mm, srv, p, sess)
 		}
-		if p.timeout > 0 {
+		m.cb = cb
+		m.sess = sess
+		timeout := p.timeout
+		if timeout > 0 {
 			srv.Fork("proxy.timeoutCallBack", func() {
-				srv.After(p.timeout, func() {
+				srv.After(timeout, func() {
 					om := &message{
-						trace: m.trace,
+						trace: trace,
 						err:   ErrRequestTimeoutLocal,
 					}
-					m.cb(om)
+					cb(om)
 				})
 			})
 		}
@@ -262,14 +150,12 @@ func (ss *serviceProxy) callThen(mm *message, srv *Service, p *promise, sess int
 		}
 		p.timeout = -1
 
-		nextProxy := false
-		if p.finalCb != nil {
-			defer func() {
-				if !nextProxy {
-					srv.Fork("proxy.req.finalCb", p.finalCb)
-				}
-			}()
-		}
+		defer func() {
+			if p.finalCb != nil {
+				p.finalCb()
+			}
+			p.clear()
+		}()
 
 		if mm.src == 0 { // error occurs
 			err := mm.getError()
@@ -281,43 +167,45 @@ func (ss *serviceProxy) callThen(mm *message, srv *Service, p *promise, sess int
 			return
 		}
 
-		fv := reflect.ValueOf(p.successCb[0])
+		fv := reflect.ValueOf(p.successCb)
 		if !fv.IsValid() {
+			srv.Errorf("rpc(%s:%v) invalid success callback", p.fName, sess)
 			return
 		}
 
 		ft := fv.Type()
-		p.successCb = p.successCb[1:]
-
-		ret, err := mm.getResponse(ft)
+		fArgs, err := mm.getResponse(ft)
 		if err != nil {
-			srv.Fatalf("rpc(%s:%v) response error: %+v", p.fName, sess, err)
+			srv.Errorf("rpc(%s:%v) response error: %+v", p.fName, sess, err)
+			return
 		}
 
 		panicked := true
 		defer func() {
 			if panicked {
-				srv.Errorf("rpc(%s:%v) response got panic: %v", p.fName, sess, string(debug.Stack()))
+				if e := recover(); e != nil {
+					srv.Errorf("rpc(%s:%v) response got panic: %v => %v", p.fName, sess, e, string(debug.Stack()))
+				} else {
+					srv.Errorf("rpc(%s:%v) response got panic: %v", p.fName, sess, string(debug.Stack()))
+				}
 			}
 		}()
-		fret := fv.Call(ret)
-		for len(p.successCb) > 0 {
-			if ft.NumOut() == 1 && ft.Out(0) == reflect.TypeOf((*IPromise)(nil)).Elem() {
-				if fret[0].IsNil() {
-					break
-				}
-				np := fret[0].Interface().(iPromise)
-				np.setCallBacks(p.successCb, p.errCb, p.finalCb)
-				np.Done()
-				nextProxy = true
-				break
-			}
 
-			fv = reflect.ValueOf(p.successCb[0])
-			ft = fv.Type()
-			fret = fv.Call(fret)
-			p.successCb = p.successCb[1:]
+		fRet := fv.Call(fArgs)
+
+		for _, arg := range fArgs {
+			if arg.CanAddr() {
+				arg.SetZero()
+			}
 		}
+		fArgs = nil
+		for _, arg := range fRet {
+			if arg.CanAddr() {
+				arg.SetZero()
+			}
+		}
+		fRet = nil
+
 		panicked = false
 	})
 }

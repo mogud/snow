@@ -35,9 +35,9 @@ func DefaultLogFormatter(logData *LogData) string {
 		now.Nanosecond()/1000/1000/10,
 	))
 	if len(logData.NodeName) > 26 {
-		sb.WriteString(fmt.Sprintf(" %6d|%-24s..", logData.NodeID, logData.NodeName[:24]))
+		sb.WriteString(fmt.Sprintf(" %6d|%-17s..", logData.NodeID, logData.NodeName[:24]))
 	} else {
-		sb.WriteString(fmt.Sprintf(" %6d|%-26s", logData.NodeID, logData.NodeName))
+		sb.WriteString(fmt.Sprintf(" %6d|%-19s", logData.NodeID, logData.NodeName))
 	}
 	sb.WriteString(" ")
 	sb.WriteString(l2info[logData.Level].str)
@@ -78,9 +78,9 @@ func ColorLogFormatter(logData *LogData) string {
 		now.Nanosecond()/1000/1000/10,
 	))
 	if len(logData.NodeName) > 26 {
-		sb.WriteString(fmt.Sprintf(" %6d|%-24s..", logData.NodeID, logData.NodeName[:24]))
+		sb.WriteString(fmt.Sprintf(" %6d|%-17s..", logData.NodeID, logData.NodeName[:24]))
 	} else {
-		sb.WriteString(fmt.Sprintf(" %6d|%-26s", logData.NodeID, logData.NodeName))
+		sb.WriteString(fmt.Sprintf(" %6d|%-19s", logData.NodeID, logData.NodeName))
 	}
 	sb.WriteString(l2info[logData.Level].color)
 	sb.WriteString(" ")

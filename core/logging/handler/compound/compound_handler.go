@@ -27,8 +27,13 @@ func (ss *Handler) Construct(opt *option.Option[*Option]) {
 }
 
 func (ss *Handler) Log(data *logging.LogData) {
-	data.NodeID = ss.opt.NodeId
-	data.NodeName = ss.opt.NodeName
+	if ss.opt.NodeId > 0 {
+		data.NodeID = ss.opt.NodeId
+	}
+	if len(ss.opt.NodeName) > 0 {
+		data.NodeName = ss.opt.NodeName
+	}
+
 	for _, handler := range ss.proxy {
 		handler.Log(data)
 	}

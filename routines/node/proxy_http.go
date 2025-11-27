@@ -2,16 +2,13 @@ package node
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/mogud/snow/core/task"
 	"io"
 	"net/http"
-	"net/url"
 	"reflect"
 	"runtime/debug"
-	"time"
 )
 
 const httpRpcPathPrefix = "/node/rpc/"
@@ -35,62 +32,22 @@ type httpProxy struct {
 	httpClient *http.Client
 }
 
-func newHttpProxy(srv *Service, name string) *httpProxy {
-	var urlBase string
-	if Config.CurNodeMap[name] {
-		urlBase = fmt.Sprintf("http://%s:%v", Config.CurNodeIP, Config.CurNodeHttpPort)
-	} else {
-	loop:
-		for _, ni := range Config.Nodes {
-			if ni.Name == Config.CurNodeName {
-				continue
-			}
-
-			for _, n := range ni.Services {
-				if n == name && len(ni.Host) > 0 && ni.HttpPort > 0 {
-					protocol := "http"
-					if ni.UseHttps {
-						protocol = "https"
-					}
-					urlBase = fmt.Sprintf("%v://%s:%v", protocol, ni.Host, ni.HttpPort)
-					break loop
-				}
-			}
-		}
-	}
-
-	if len(urlBase) == 0 {
-		return nil
-	}
-
-	// TODO by mogu: Golang HTTP2 有 bug，会导致超时访问，使用 HTTP1 可以绕过
-	tr := &http.Transport{}
-	tr.TLSClientConfig = &tls.Config{
-		NextProtos: []string{"h1"},
-	}
-
-	res, _ := url.JoinPath(urlBase, httpRpcPathPrefix, name)
-	return &httpProxy{
-		srv: srv,
-		url: res,
-		httpClient: &http.Client{
-			Timeout:   time.Second * 8,
-			Transport: tr,
-		},
-	}
-}
-
 func (ss *httpProxy) onError(p *promise, err error) {
+	defer func() {
+		ss.srv.Fork("httpProxy.doCall.finalCb", func() {
+			if p.finalCb != nil {
+				p.finalCb()
+			}
+			p.clear()
+		})
+	}()
+
 	if p.errCb != nil {
 		ss.srv.Fork("httpProxy.doCall.errCb", func() {
 			p.errCb(err)
 		})
 	} else {
 		ss.srv.Errorf("httpRpc(%s) uncatched error: %+v", p.fName, err)
-	}
-
-	if p.finalCb != nil {
-		ss.srv.Fork("httpProxy.doCall.finalCb", p.finalCb)
 	}
 }
 
@@ -104,7 +61,7 @@ func (ss *httpProxy) doCall(p *promise) {
 
 		req := &httpRequest{
 			Func: p.fName,
-			Post: len(p.successCb) == 0,
+			Post: p.successCb == nil,
 			Args: argsStr,
 		}
 
@@ -112,7 +69,8 @@ func (ss *httpProxy) doCall(p *promise) {
 		if p.timeout == -1 {
 			httpClient = ss.httpClient
 		} else {
-			httpClient = &*httpClient
+			c := *ss.httpClient
+			httpClient = &c
 			httpClient.Timeout = p.timeout
 		}
 
@@ -141,23 +99,21 @@ func (ss *httpProxy) prepareThen(p *promise, resp *http.Response) {
 		return
 	}
 
-	if len(p.successCb) == 0 {
-		if p.finalCb != nil {
-			ss.srv.Fork("httpProxy.post.finalCb", p.finalCb)
-		}
+	if p.successCb == nil {
+		ss.srv.Fork("httpProxy.post.finalCb.noSuccessor", func() {
+			if p.finalCb != nil {
+				p.finalCb()
+			}
+			p.clear()
+		})
 		return
 	}
 
-	fv := reflect.ValueOf(p.successCb[0])
+	fv := reflect.ValueOf(p.successCb)
 	if !fv.IsValid() {
-		if p.finalCb != nil {
-			ss.srv.Fork("httpProxy.post.finalCb", p.finalCb)
-		}
+		ss.onError(p, fmt.Errorf("invalid success callback"))
 		return
 	}
-
-	ft := fv.Type()
-	p.successCb = p.successCb[1:]
 
 	var rsp httpResponse
 	err = jsoniter.Unmarshal(rspBody, &rsp)
@@ -166,6 +122,7 @@ func (ss *httpProxy) prepareThen(p *promise, resp *http.Response) {
 		return
 	}
 
+	ft := fv.Type()
 	resArgs := make([]any, 0, ft.NumIn())
 	for i := 0; i < ft.NumIn(); i++ {
 		resArgs = append(resArgs, reflect.New(ft.In(i)).Interface())
@@ -175,54 +132,47 @@ func (ss *httpProxy) prepareThen(p *promise, resp *http.Response) {
 		return
 	}
 
-	rArgs := make([]reflect.Value, len(resArgs))
+	fArgs := make([]reflect.Value, len(resArgs))
 	for i, v := range resArgs {
 		if v == nil {
-			rArgs[i] = reflect.Zero(ft.In(i))
+			fArgs[i] = reflect.Zero(ft.In(i))
 		} else {
-			rArgs[i] = reflect.ValueOf(v).Elem()
+			fArgs[i] = reflect.ValueOf(v).Elem()
 		}
 	}
 
-	ss.callThen(p, ft, fv, rArgs)
+	ss.callThen(p, fv, fArgs)
 }
 
-func (ss *httpProxy) callThen(p *promise, ft reflect.Type, fv reflect.Value, rArgs []reflect.Value) {
+func (ss *httpProxy) callThen(p *promise, fv reflect.Value, fArgs []reflect.Value) {
 	ss.srv.Fork("httpProxy.fork", func() {
-		nextProxy := false
-		if p.finalCb != nil {
-			defer func() {
-				if !nextProxy {
-					ss.srv.Fork("httpProxy.req.finalCb", p.finalCb)
-				}
-			}()
-		}
-
 		panicked := true
 		defer func() {
 			if panicked {
 				ss.srv.Errorf("httpRpc(%s) response got panic: %v", p.fName, string(debug.Stack()))
 			}
+
+			if p.finalCb != nil {
+				p.finalCb()
+			}
+			p.clear()
 		}()
 
-		fret := fv.Call(rArgs)
-		for len(p.successCb) > 0 {
-			if ft.NumOut() == 1 && ft.Out(0) == reflect.TypeOf((*IPromise)(nil)).Elem() {
-				if fret[0].IsNil() {
-					break
-				}
-				np := fret[0].Interface().(iPromise)
-				np.setCallBacks(p.successCb, p.errCb, p.finalCb)
-				np.Done()
-				nextProxy = true
-				break
-			}
+		fRet := fv.Call(fArgs)
 
-			fv = reflect.ValueOf(p.successCb[0])
-			ft = fv.Type()
-			fret = fv.Call(fret)
-			p.successCb = p.successCb[1:]
+		for _, arg := range fArgs {
+			if arg.CanAddr() {
+				arg.SetZero()
+			}
 		}
+		fArgs = nil
+		for _, arg := range fRet {
+			if arg.CanAddr() {
+				arg.SetZero()
+			}
+		}
+		fRet = nil
+
 		panicked = false
 	})
 }
@@ -237,60 +187,4 @@ func (ss *httpProxy) GetNodeAddr() INodeAddr {
 
 func (ss *httpProxy) Avail() bool {
 	return true
-}
-
-var _ IRpcContext = (*httpRpcContext)(nil)
-
-type httpRpcContext struct {
-	ch   chan *httpResponse
-	errF func(error)
-}
-
-func newHttpRpcContext(ch chan *httpResponse) *httpRpcContext {
-	return &httpRpcContext{
-		ch: ch,
-	}
-}
-
-func (ss *httpRpcContext) GetRemoteNodeAddr() INodeAddr {
-	return Addr(0)
-}
-
-func (ss *httpRpcContext) GetRemoteServiceAddr() int32 {
-	return 0
-}
-
-func (ss *httpRpcContext) Catch(f func(error)) IRpcContext {
-	ss.errF = f
-	return ss
-}
-
-func (ss *httpRpcContext) Return(args ...any) {
-	if args == nil {
-		args = make([]any, 0)
-	}
-	argsStr, err := jsoniter.Marshal(args)
-	if err != nil {
-		ss.ch <- &httpResponse{
-			StatusCode: http.StatusInternalServerError,
-			Result:     jsoniter.RawMessage(err.Error()),
-		}
-		return
-	}
-
-	ss.ch <- &httpResponse{
-		StatusCode: http.StatusOK,
-		Result:     argsStr,
-	}
-}
-
-func (ss *httpRpcContext) Error(err error) {
-	ss.ch <- &httpResponse{
-		StatusCode: http.StatusBadRequest,
-		Result:     jsoniter.RawMessage(err.Error()),
-	}
-}
-
-func (ss *httpRpcContext) onError(err error) {
-	ss.errF(err)
 }

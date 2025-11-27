@@ -1,53 +1,122 @@
 package ticker
 
 import (
+	"context"
 	"github.com/mogud/snow/core/task"
+	"math"
+	"runtime"
+	"server/lib/uid"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-var TickInterval int64 = 33_333_333
+type PoolItem interface {
+	Paused() bool
+	Closed() bool
+}
 
-var (
-	lock sync.Mutex
-	chs  map[int64]chan<- int64
-)
+type Pool struct {
+	name         string
+	ctx          context.Context
+	closeWait    *sync.WaitGroup
+	itemChan     chan PoolItem
+	tickDuration time.Duration
+}
 
-func init() {
-	chs = make(map[int64]chan<- int64, 200)
+func NewPool(name string, ctx context.Context, wg *sync.WaitGroup, itemChanSize int, tickDuration time.Duration) *Pool {
+	return &Pool{
+		name:         name,
+		ctx:          ctx,
+		closeWait:    wg,
+		itemChan:     make(chan PoolItem, itemChanSize),
+		tickDuration: tickDuration,
+	}
+}
+
+func (ss *Pool) Start(tickCallback func(item PoolItem), stopCallback func(item PoolItem)) {
+	ss.closeWait.Add(1)
+	defer ss.closeWait.Done()
+
+	workerSize := runtime.NumCPU()
+	type tickWorker struct {
+		id    uid.Uid
+		count atomic.Int32
+		ch    chan PoolItem
+	}
+	workerMap := make([]*tickWorker, workerSize)
+	for i := 0; i < workerSize; i++ {
+		workerMap[i] = &tickWorker{
+			id: uid.Gen(),
+			ch: make(chan PoolItem, 100),
+		}
+	}
+
+	ss.closeWait.Add(1)
 	task.Execute(func() {
-		prevUnixNano := time.Now().UnixNano()
-		for {
-			lock.Lock()
-			for _, ch := range chs {
-				select {
-				case ch <- prevUnixNano:
-				default:
-				}
-			}
-			lock.Unlock()
+		defer ss.closeWait.Done()
 
-			nowUnixNano := time.Now().UnixNano()
-			nextUnixNano := prevUnixNano + TickInterval
-			delta := nextUnixNano - nowUnixNano
-			if delta > 0 {
-				prevUnixNano = nextUnixNano
-				time.Sleep(time.Duration(delta))
-			} else {
-				prevUnixNano = nowUnixNano
+		for {
+			select {
+			case item := <-ss.itemChan:
+				var lowestLoadWorker *tickWorker
+				var minLoadCount int32 = math.MaxInt32
+				for _, worker := range workerMap {
+					workerLoadCount := worker.count.Load()
+					if workerLoadCount < minLoadCount {
+						minLoadCount = workerLoadCount
+						lowestLoadWorker = worker
+					}
+				}
+
+				lowestLoadWorker.ch <- item
+			case <-ss.ctx.Done():
+				return
 			}
 		}
 	})
+
+	for _, worker := range workerMap {
+		ss.closeWait.Add(1)
+		task.Execute(func() {
+			defer ss.closeWait.Done()
+
+			t := time.NewTicker(ss.tickDuration)
+			itemMap := make(map[PoolItem]bool)
+			for {
+				select {
+				case <-t.C:
+					var itemToClose []PoolItem
+					for item := range itemMap {
+						if item.Closed() {
+							itemToClose = append(itemToClose, item)
+							if stopCallback != nil {
+								stopCallback(item)
+							}
+						} else if !item.Paused() {
+							tickCallback(item)
+						}
+					}
+
+					if len(itemToClose) > 0 {
+						for _, item := range itemToClose {
+							delete(itemMap, item)
+						}
+						worker.count.Store(int32(len(itemMap)))
+					}
+				case item := <-worker.ch:
+					if _, ok := itemMap[item]; !ok {
+						itemMap[item] = true
+						worker.count.Store(int32(len(itemMap)))
+					}
+				case <-ss.ctx.Done():
+					return
+				}
+			}
+		})
+	}
 }
 
-func Subscribe(id int64, ch chan<- int64) {
-	lock.Lock()
-	defer lock.Unlock()
-	chs[id] = ch
-}
-
-func Unsubscribe(id int64) {
-	lock.Lock()
-	defer lock.Unlock()
-	delete(chs, id)
+func (ss *Pool) Add(item PoolItem) {
+	ss.itemChan <- item
 }

@@ -52,8 +52,12 @@ func (ss *message) unmarshalArgs(bs []byte, argI int, ft reflect.Type) ([]reflec
 		return nil, err
 	}
 	ret := make([]reflect.Value, 0, len(tArgs))
-	for _, arg := range tArgs {
-		ret = append(ret, reflect.ValueOf(arg).Elem())
+	for i, arg := range tArgs {
+		if arg == nil {
+			ret = append(ret, reflect.Zero(ft.In(i)))
+		} else {
+			ret = append(ret, reflect.ValueOf(arg).Elem())
+		}
 	}
 	return ret, nil
 }
@@ -82,6 +86,7 @@ func (ss *message) marshal() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		ss.args = nil
 
 		ss.data = make([]byte, messageHeaderLen+2+lof+len(bs))
 		binary.LittleEndian.PutUint16(ss.data[messageHeaderLen:], uint16(2+lof))
@@ -94,6 +99,8 @@ func (ss *message) marshal() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		ss.args = nil
+
 		ss.data = make([]byte, messageHeaderLen+len(bs))
 		copy(ss.data[messageHeaderLen:], bs)
 	} else {
@@ -173,7 +180,9 @@ func (ss *message) getRequestFunc() (string, error) {
 
 func (ss *message) getRequestFuncArgs(ft reflect.Type) ([]reflect.Value, error) {
 	if len(ss.fName) > 0 {
-		return ss.args, nil
+		args := ss.args
+		ss.args = nil
+		return args, nil
 	}
 
 	lof, err := ss.getRequestFuncLen()
@@ -198,7 +207,16 @@ func (ss *message) writeResponse(args ...any) {
 
 func (ss *message) getResponse(ft reflect.Type) ([]reflect.Value, error) {
 	if ss.args != nil {
-		return ss.args, nil
+		args := ss.args
+		ss.args = nil
+
+		for i := 0; i < len(args); i++ {
+			if !args[i].IsValid() {
+				argTy := ft.In(i)
+				args[i] = reflect.Zero(argTy)
+			}
+		}
+		return args, nil
 	}
 
 	bs := ss.data[messageHeaderLen:]
@@ -207,4 +225,10 @@ func (ss *message) getResponse(ft reflect.Type) ([]reflect.Value, error) {
 		return nil, err
 	}
 	return args, nil
+}
+
+func (ss *message) clear() {
+	ss.cb = nil
+	ss.args = nil
+	ss.data = nil
 }

@@ -9,9 +9,9 @@ import (
 var _ = (INodeAddr)((*Addr)(nil))
 
 var (
-	addrAutoSearch = Addr(-2)
-	AddrInvalid    = Addr(-1)
-	AddrLocal      = Addr(0)
+	AddrLocal   = Addr(0)
+	AddrRemote  = Addr(-1)
+	AddrInvalid = Addr(-2)
 )
 
 type Addr int64

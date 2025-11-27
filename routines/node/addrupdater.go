@@ -5,22 +5,22 @@ import (
 	"sync/atomic"
 )
 
-type NodeAddrUpdater struct {
+type AddrUpdater struct {
 	nAddr   int64
-	updateF func(chan<- *Addr)
+	updateF func(chan<- Addr)
 	running int32
 	sigChan chan bool
 }
 
-func NewNodeAddrUpdater(nAddr Addr, updateFunc func(chan<- *Addr)) *NodeAddrUpdater {
-	return &NodeAddrUpdater{
+func NewNodeAddrUpdater(nAddr Addr, updateFunc func(chan<- Addr)) *AddrUpdater {
+	return &AddrUpdater{
 		nAddr:   int64(nAddr),
 		updateF: updateFunc,
 		sigChan: make(chan bool, 1024),
 	}
 }
 
-func (ss *NodeAddrUpdater) Start() {
+func (ss *AddrUpdater) Start() {
 	task.Execute(func() {
 		for {
 			select {
@@ -31,27 +31,25 @@ func (ss *NodeAddrUpdater) Start() {
 	})
 }
 
-func (ss *NodeAddrUpdater) GetNodeAddr() Addr {
+func (ss *AddrUpdater) GetNodeAddr() Addr {
 	return Addr(atomic.LoadInt64(&ss.nAddr))
 }
 
-func (ss *NodeAddrUpdater) getSigChan() chan<- bool {
+func (ss *AddrUpdater) getSigChan() chan<- bool {
 	return ss.sigChan
 }
 
-func (ss *NodeAddrUpdater) retryUpdateAddr() {
+func (ss *AddrUpdater) retryUpdateAddr() {
 	if !atomic.CompareAndSwapInt32(&ss.running, 0, 1) {
 		return
 	}
 
-	addrChan := make(chan *Addr, 1)
+	addrChan := make(chan Addr, 1)
 	ss.updateF(addrChan)
 
 	task.Execute(func() {
 		newAddr := <-addrChan
-		if newAddr != nil {
-			atomic.StoreInt64(&ss.nAddr, int64(*newAddr))
-		}
+		atomic.StoreInt64(&ss.nAddr, int64(newAddr))
 		atomic.StoreInt32(&ss.running, 0)
 	})
 }

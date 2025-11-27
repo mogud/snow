@@ -16,13 +16,8 @@ type IProxy interface {
 	Avail() bool
 }
 
-type ITimer interface {
-	Start()
+type ITimeWheelHandle interface {
 	Stop()
-	SetInterval(interval time.Duration)
-	SetDelay(delay time.Duration)
-	SetFunc(f func())
-	Set(interval, delay time.Duration, f func())
 }
 
 type IRpcContext interface {
@@ -37,4 +32,13 @@ type INodeAddr interface {
 	IsLocalhost() bool
 	GetIPString() string
 	String() string
+}
+
+type IMetricCollector interface {
+	// Gauge 仪表，设置值
+	Gauge(name string, val int64)
+	// Counter 计数器，累加值
+	Counter(name string, val uint64)
+	// Histogram 直方图，累加，但值为浮点数，可为正负
+	Histogram(name string, val float64)
 }

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"crypto/tls"
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/mogud/snow/core/debug"
@@ -8,8 +9,9 @@ import (
 	"github.com/mogud/snow/core/task"
 	"github.com/mogud/snow/core/ticker"
 	"github.com/valyala/fasthttp"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -19,6 +21,7 @@ import (
 
 var _ iService = (*Service)(nil)
 var _ iMessageSender = (*Service)(nil)
+var _ ticker.PoolItem = (*Service)(nil)
 
 // Methods of Service overridable
 type iService interface {
@@ -34,20 +37,29 @@ type iService interface {
 	getService() *Service
 }
 
+type tagFunc struct {
+	Tag string
+	F   func()
+}
+
 type Service struct {
+	node *Node
+
 	methodMap     map[string]reflect.Value
 	httpMethodMap map[string]reflect.Value
 
-	realSrv  iService
-	name     string
-	kind     int32
-	sAddr    int32
-	chanSize int
-	msgChan  chan *message
-	funcChan chan *tagFunc
+	realSrv iService
+	name    string
+	kind    int32
+	sAddr   int32
+
+	funcBufferLock sync.Mutex
+	funcBuffer     []*tagFunc
+	msgBufferLock  sync.Mutex
+	msgBuffer      []*message
 
 	nowNs           int64
-	timeWheel       *timeWheel
+	tw              *timeWheel
 	delayedRpc      []func()
 	allowedRpc      map[string]bool
 	delayedHttpRpc  []chan struct{}
@@ -60,8 +72,7 @@ type Service struct {
 	closedLock int32
 	wg         *sync.WaitGroup
 
-	load   int64
-	sMeter IProxy
+	metricNameFuncPrefix string
 }
 
 func (ss *Service) Start(_ any) {
@@ -80,19 +91,37 @@ func (ss *Service) Entry(ctx IRpcContext, funcName string, argGetter func(ft ref
 		ss.Errorf("doDispatch: get args error: %+v name = %v", err, funcName)
 		return nil
 	}
-	rArgs := []reflect.Value{reflect.ValueOf(ss.realSrv), reflect.ValueOf(ctx)}
+	fArgs := append([]reflect.Value{reflect.ValueOf(ss.realSrv), reflect.ValueOf(ctx)}, args...)
 	return func() {
-		f.Call(append(rArgs, args...))
+		f.Call(fArgs)
+
+		for _, arg := range fArgs {
+			if arg.CanAddr() {
+				arg.SetZero()
+			}
+		}
+		fArgs = nil
 	}
 }
 
 // Construct 注入构造函数
 func (ss *Service) Construct(logger *logging.Logger[Service]) {
+	selfPtr := unsafe.Pointer(ss)
+	path := ss.loggerPath
+	name := ss.name
 	ss.logger = logger.Get(func(data *logging.LogData) {
-		data.Name = "*" + ss.name
-		data.ID = fmt.Sprintf("%X", unsafe.Pointer(ss))
-		data.Path = ss.loggerPath
+		data.Name = "*" + name
+		data.ID = fmt.Sprintf("%X", selfPtr)
+		data.Path = path
 	})
+}
+
+func (ss *Service) Paused() bool {
+	return false
+}
+
+func (ss *Service) Closed() bool {
+	return ss.closed()
 }
 
 // GetName 获取服务名称，线程安全
@@ -108,21 +137,6 @@ func (ss *Service) GetKind() int32 {
 // GetAddr 获取服务地址，线程安全
 func (ss *Service) GetAddr() int32 {
 	return ss.sAddr
-}
-
-// GetMetric 获取服务指标系统，线程安全
-func (ss *Service) GetMetric() IProxy {
-	return ss.sMeter
-}
-
-// GetLoad 获取负载，非线程安全
-func (ss *Service) GetLoad() float64 {
-	return float64(ss.load) / 1000
-}
-
-// SetChannelSize 设置消息队列大小，注入构造时才可使用
-func (ss *Service) SetChannelSize(size int) {
-	ss.chanSize = size
 }
 
 // SetAllowedRPC 设置允许调用的 RPC 函数，不含 "Rpc" 头，非线程安全
@@ -168,13 +182,7 @@ func (ss *Service) EnableHttpRPCForward(srvAddresses []int32) {
 
 // Fork 将函数放入主线程并在下一帧中执行，线程安全
 func (ss *Service) Fork(tag string, f func()) bool {
-	tf := &tagFunc{Tag: tag, F: f}
-	select {
-	case ss.funcChan <- tf:
-		return true
-	default:
-		return false
-	}
+	return ss.fork(tag, f)
 }
 
 // GetTime 获取当前时间，非线程安全
@@ -193,19 +201,19 @@ func (ss *Service) GetMillisecond() int64 {
 }
 
 // Tick 定时器，延迟 delay 时间并在后续以 interval 时间间隔执行函数 f，间隔时间与函数执行时间无关，非线程安全
-func (ss *Service) Tick(interval, delay time.Duration, f func()) ITimer {
-	return ss.timeWheel.Tick(interval, delay, f)
+func (ss *Service) Tick(interval, delay time.Duration, f func()) ITimeWheelHandle {
+	return ss.tw.createTickItem(interval, delay, f)
 }
 
 // TickDelayRandom 定时器，延迟 [0, interval) 随机时间并在后续以 interval 时间间隔执行函数 f，间隔时间与函数执行时间无关，非线程安全
-func (ss *Service) TickDelayRandom(interval time.Duration, f func()) ITimer {
-	delay := time.Duration(rand.Int63n(int64(interval)))
-	return ss.timeWheel.Tick(interval, delay, f)
+func (ss *Service) TickDelayRandom(interval time.Duration, f func()) ITimeWheelHandle {
+	delay := time.Duration(rand.Int64N(int64(interval)))
+	return ss.tw.createTickItem(interval, delay, f)
 }
 
 // TickAfter 定时器，延迟 interval 时间后执行函数 f，若传入 f 的函数参数被执行，则延迟 interval 后继续执行函数 f，非线程安全
-func (ss *Service) TickAfter(interval time.Duration, f func(func())) ITimer {
-	return ss.timeWheel.After(interval, func() {
+func (ss *Service) TickAfter(interval time.Duration, f func(func())) ITimeWheelHandle {
+	return ss.tw.createAfterItem(interval, func() {
 		f(func() {
 			ss.TickAfter(interval, f)
 		})
@@ -213,87 +221,51 @@ func (ss *Service) TickAfter(interval time.Duration, f func(func())) ITimer {
 }
 
 // After 定时器，延迟 delay 时间后执行函数 f，非线程安全
-func (ss *Service) After(delay time.Duration, f func()) ITimer {
-	return ss.timeWheel.After(delay, f)
+func (ss *Service) After(delay time.Duration, f func()) ITimeWheelHandle {
+	return ss.tw.createAfterItem(delay, f)
 }
 
 // CreateEmptyProxy 创建空代理，线程安全
 func (ss *Service) CreateEmptyProxy() IProxy {
-	return dumbProxyObj
+	return &serviceProxy{}
+}
+
+// CreateProxy 根据服务名自动创建代理，线程安全
+func (ss *Service) CreateProxy(name string) IProxy {
+	return ss.createProxy(nil, AddrInvalid, 0, name)
 }
 
 // CreateProxyByNodeKind 根据节点地址及服务名创建代理，线程安全
 func (ss *Service) CreateProxyByNodeKind(nAddr INodeAddr, name string) IProxy {
-	kind := gNode.name2Info[name].Kind
-	p := newServiceProxy(ss, nil, nAddr.(Addr), -kind)
-	if p == nil {
-		ss.Errorf("[CreateProxyByNodeKind] create tcp proxy but no service(%v) found available", name)
-	}
-	return p
+	return ss.createProxy(nil, nAddr.(Addr), 0, name)
 }
 
 // CreateProxyByNodeAddr 根据节点地址及服务地址创建代理，线程安全
 func (ss *Service) CreateProxyByNodeAddr(nAddr INodeAddr, sAddr int32) IProxy {
-	p := newServiceProxy(ss, nil, nAddr.(Addr), sAddr)
-	if p == nil {
-		ss.Errorf("[CreateProxyByNodeAddr] create tcp proxy but no service(%v-%v) found available", nAddr, sAddr)
-	}
-	return p
+	return ss.createProxy(nil, nAddr.(Addr), sAddr, "")
 }
 
-// Deprecated: 废弃，未来移除
-func (ss *Service) CreateProxyByUpdaterKind(nAddrUpdater *NodeAddrUpdater, name string) IProxy {
-	kind := gNode.name2Info[name].Kind
-	return newServiceProxy(ss, nAddrUpdater, AddrLocal, -kind)
+// CreateProxyByUpdaterKind 根据节点地址更新器及服务名创建代理，线程安全
+func (ss *Service) CreateProxyByUpdaterKind(nAddrUpdater *AddrUpdater, name string) IProxy {
+	return ss.createProxy(nAddrUpdater, AddrInvalid, 0, name)
 }
 
-// CreateTcpProxy 根据服务名以及在配置中的顺序依次在配置的当前节点及其他节点查询并创建代理，线程安全
-func (ss *Service) CreateTcpProxy(name string) IProxy {
-	kind := gNode.name2Info[name].Kind
-	p := newServiceProxy(ss, nil, addrAutoSearch, -kind)
-	if p == nil {
-		ss.Errorf("[CreateTcpProxy] create http proxy but no service(%v) found available", name)
-	}
-	return p
-}
-
-// CreateHttpProxy 创建 HTTP 代理，线程安全
-func (ss *Service) CreateHttpProxy(name string) IProxy {
-	p := newHttpProxy(ss, name)
-	if p == nil {
-		ss.Errorf("[CreateHttpProxy] create tcp proxy but no service(%v) found available", name)
-	}
-	return p
-}
-
-// CreateTcpPriorProxy 创建 Tcp 代理，若不存在则创建 Http 代理，线程安全
-func (ss *Service) CreateTcpPriorProxy(name string) IProxy {
-	kind := gNode.name2Info[name].Kind
-	p := IProxy(newServiceProxy(ss, nil, addrAutoSearch, -kind))
-	if p != nil {
-		return p
+func (ss *Service) CreateHttpProxy(httpUrl, name string) IProxy {
+	// TODO by mogu: Golang HTTP2 有 bug，会导致超时访问，使用 HTTP1 可以绕过
+	tr := &http.Transport{}
+	tr.TLSClientConfig = &tls.Config{
+		NextProtos: []string{"h1"},
 	}
 
-	p = newHttpProxy(ss, name)
-	if p == nil {
-		ss.Errorf("[CreateTcpPriorProxy] create http proxy but no service(%v) found available", name)
+	res, _ := url.JoinPath(httpUrl, httpRpcPathPrefix, name)
+	return &httpProxy{
+		srv: ss,
+		url: res,
+		httpClient: &http.Client{
+			Timeout:   time.Second * 8,
+			Transport: tr,
+		},
 	}
-	return p
-}
-
-// CreateHttpPriorProxy 创建 Http 代理，若不存在则创建 Tcp 代理，线程安全
-func (ss *Service) CreateHttpPriorProxy(name string) IProxy {
-	p := IProxy(newHttpProxy(ss, name))
-	if p != nil {
-		return p
-	}
-
-	kind := gNode.name2Info[name].Kind
-	p = newServiceProxy(ss, nil, addrAutoSearch, -kind)
-	if p == nil {
-		ss.Errorf("[CreateHttpPriorProxy] create http proxy but no service(%v) found available", name)
-	}
-	return p
 }
 
 // RpcStatus 获取服务状态 RPC 的默认实现
@@ -334,42 +306,34 @@ func (ss *Service) getService() *Service {
 	return ss
 }
 
-func (ss *Service) init(name string, kind int32, sAddr int32, chanSize int, realService iService, methodMap map[string]reflect.Value, httpMethodMap map[string]reflect.Value) {
+func (ss *Service) init(node *Node, name string, kind int32, sAddr int32,
+	realService iService, methodMap map[string]reflect.Value, httpMethodMap map[string]reflect.Value) {
+
+	ss.node = node
 	ss.name = name
 	ss.loggerPath = "Service/" + name
 	ss.kind = kind
 	ss.sAddr = sAddr
-	ss.chanSize = chanSize
 	ss.realSrv = realService
 	ss.methodMap = methodMap
 	ss.httpMethodMap = httpMethodMap
 	ss.wg = &sync.WaitGroup{}
 
-	ss.timeWheel = &timeWheel{
-		queue:  &timerQueue{},
-		timeMs: time.Now().UnixMilli(),
-	}
+	ss.tw = newTimeWheel(time.Now(), 10*time.Millisecond)
 	ss.delayedRpc = make([]func(), 0, 4)
 	ss.allowedRpc = make(map[string]bool)
 	ss.delayedHttpRpc = make([]chan struct{}, 0, 4)
 
-	if _, ok := Config.CurNodeMap["Metric"]; ok {
-		ss.sMeter = ss.CreateTcpProxy("Metric")
-	} else {
-		ss.sMeter = ss.CreateEmptyProxy()
-	}
+	ss.metricNameFuncPrefix = "[ServiceFunc] " + ss.name + "::"
 }
 
 func (ss *Service) afterInject() {
-	ss.msgChan = make(chan *message, ss.chanSize)
-	ss.funcChan = make(chan *tagFunc, ss.chanSize)
 }
 
 func (ss *Service) start(arg any) {
 	ss.wg.Add(1)
 
 	ss.nowNs = time.Now().UnixNano()
-
 	task.Execute(func() {
 		isStandalone := Config.CurNodeMap[ss.name]
 		if isStandalone {
@@ -382,100 +346,52 @@ func (ss *Service) start(arg any) {
 			ss.Infof("start success")
 		}
 
-		ss.mainLoop()
+		defer ss.wg.Done()
+
+		if ss.closed() {
+			return
+		}
+
+		// 这里即等待 onTickStop 完成
+		ss.wg.Add(1)
+		ss.nowNs = time.Now().UnixNano()
+		ss.node.serviceTickerPool.Add(ss)
 	})
 }
 
-func (ss *Service) mainLoop() {
-	if ss.closed() {
-		ss.wg.Done()
-		return
-	}
+func (ss *Service) onTick() {
+	now := time.Now()
+	ss.nowNs = now.UnixNano()
+	ss.tw.update(now)
 
-	tch := make(chan int64, 1024)
-	ticker.Subscribe(int64(ss.sAddr), tch)
-	unixNano := <-tch
-	ss.nowNs = unixNano
+	ss.funcBufferLock.Lock()
+	funcList := ss.funcBuffer
+	ss.funcBuffer = nil
+	ss.funcBufferLock.Unlock()
 
-	//meterMs := int64(0)
-	//meterForkFuncCallCount := int64(0)
-	//meterForkFuncCostMs := int64(0)
-	//meterRpcFuncCallCount := int64(0)
-	//meterRpcFuncCostMs := int64(0)
+	mc := ss.node.regOpt.MetricCollector
+	for _, f := range funcList {
+		if mc != nil {
+			start := time.Now().UnixNano()
+			ss.doFunc(f)
+			dur := time.Now().UnixNano() - start
 
-L:
-	for {
-		select {
-		case unixNano = <-tch:
-			n := len(tch)
-			for i := 0; i < n; i++ {
-				unixNano = <-tch
-			}
-			ss.nowNs = unixNano
-			ss.timeWheel.Update(ss.GetMillisecond())
-		case msg := <-ss.msgChan:
-			ss.doDispatch(msg)
-		case f := <-ss.funcChan:
+			mc.Histogram(ss.metricNameFuncPrefix+f.Tag, float64(dur))
+		} else {
 			ss.doFunc(f)
 		}
-
-		//meterMs += (unixNano - ss.nowNs) / 1000_000
-		//if meterMs/1000 > 1 {
-		//	m := &metrics.MeterData{
-		//		Type:  metrics.MetricGauge_RPCFunctionExecuteCount,
-		//		Value: meterRpcFuncCostMs,
-		//		Count: meterRpcFuncCallCount,
-		//	}
-		//	ss.sMeter.Call("Counter", m).Done()
-		//
-		//	m2 := &metrics.MeterData{
-		//		Type:  metrics.MetricGauge_ForkFunctionExecuteCount,
-		//		Value: meterForkFuncCostMs,
-		//		Count: meterForkFuncCallCount,
-		//	}
-		//	ss.sMeter.Call("Counter", m2).Done()
-		//
-		//	meterMs = 0
-		//	meterForkFuncCostMs = 0
-		//	meterForkFuncCallCount = 0
-		//	meterRpcFuncCallCount = 0
-		//	meterRpcFuncCostMs = 0
-		//}
-
-		//var messages []*message
-		//for msg := ss.msgChan.deq(); msg != nil; msg = ss.msgChan.deq() {
-		//	messages = append(messages, msg)
-		//}
-		//
-		//start := time.Now().UnixMilli()
-		//for _, msg := range messages {
-		//	ss.doDispatch(msg)
-		//}
-		//meterRpcFuncCallCount += int64(len(messages))
-		//end := time.Now().UnixMilli()
-		//cost := end - start
-		//meterRpcFuncCostMs += cost
-		//
-		//var functions []*tagFunc
-		//for f := ss.funcChan.deq(); f != nil; f = ss.funcChan.deq() {
-		//	functions = append(functions, f)
-		//}
-		//
-		//start = time.Now().UnixMilli()
-		//for _, f := range functions {
-		//	ss.doFunc(f)
-		//}
-		//end = time.Now().UnixMilli()
-		//cost = end - start
-		//meterForkFuncCostMs += cost
-		//meterForkFuncCallCount += int64(len(functions))
-
-		if ss.closed() {
-			break L
-		}
 	}
 
-	ticker.Unsubscribe(int64(ss.sAddr))
+	ss.msgBufferLock.Lock()
+	msgList := ss.msgBuffer
+	ss.msgBuffer = nil
+	ss.msgBufferLock.Unlock()
+	for _, msg := range msgList {
+		ss.doDispatch(msg)
+	}
+}
+
+func (ss *Service) onTickStop() {
 	ss.wg.Done()
 }
 
@@ -505,10 +421,12 @@ func (ss *Service) stop() {
 
 		wg.Done()
 	})
+
 	wg.Wait()
 
 	atomic.StoreInt32(&ss.closedLock, 2)
 
+	// 等待初始化或 ticker 结束，也即等待 service 的主线程结束
 	ss.wg.Wait()
 
 	func() {
@@ -518,33 +436,86 @@ func (ss *Service) stop() {
 				ss.Errorf("service 'AfterStop' execute error: %v\n%s", err, buf)
 			}
 		}()
+
 		ss.realSrv.AfterStop()
 	}()
 
 	if isStandalone {
 		ss.Infof("stop success")
 	}
+
+	// 清空 buffer
+	ss.send(nil)
+	ss.fork("", nil)
+
+	ss.node = nil
+
+	ss.methodMap = nil
+	ss.httpMethodMap = nil
+
+	ss.realSrv = nil
+	ss.tw = nil
+	ss.delayedRpc = nil
+	ss.allowedRpc = nil
+	ss.delayedHttpRpc = nil
+	ss.httpForwardAddr = nil
+
+	ss.wg = nil
 }
 
 func (ss *Service) closed() bool {
 	return atomic.LoadInt32(&ss.closedLock) == 2
 }
 
-func (ss *Service) send(msg *message) bool {
-	select {
-	case ss.msgChan <- msg:
-		return true
-	default:
+func (ss *Service) fork(tag string, f func()) bool {
+	if ss.closed() {
+		ss.funcBufferLock.Lock()
+		defer ss.funcBufferLock.Unlock()
+
+		if ss.funcBuffer != nil {
+			for _, tagF := range ss.funcBuffer {
+				tagF.F = nil
+			}
+			ss.funcBuffer = nil
+		}
+
 		return false
 	}
+
+	ss.funcBufferLock.Lock()
+	defer ss.funcBufferLock.Unlock()
+	ss.funcBuffer = append(ss.funcBuffer, &tagFunc{Tag: tag, F: f})
+	return true
+}
+
+func (ss *Service) send(msg *message) bool {
+	if ss.closed() {
+		ss.msgBufferLock.Lock()
+		defer ss.msgBufferLock.Unlock()
+
+		if ss.msgBuffer != nil {
+			for _, m := range ss.msgBuffer {
+				m.clear()
+			}
+			ss.msgBuffer = nil
+		}
+
+		return false
+	}
+
+	ss.msgBufferLock.Lock()
+	defer ss.msgBufferLock.Unlock()
+	ss.msgBuffer = append(ss.msgBuffer, msg)
+	return true
 }
 
 func (ss *Service) doFunc(f *tagFunc) {
 	defer func() {
 		if err := recover(); err != nil {
 			buf := debug.StackInfo()
-			ss.Errorf("service execute anonymous function error: %v\n%s", err, buf)
+			ss.Errorf("service execute function(%v) error: %v\n%s", f.Tag, err, buf)
 		}
+		f.F = nil
 	}()
 	f.F()
 }
@@ -552,6 +523,8 @@ func (ss *Service) doFunc(f *tagFunc) {
 func (ss *Service) doDispatch(mReq *message) {
 	var funcName string
 	defer func() {
+		mReq.clear()
+
 		if err := recover(); err != nil {
 			buf := debug.StackInfo()
 			if len(funcName) == 0 {
@@ -576,18 +549,39 @@ func (ss *Service) doDispatch(mReq *message) {
 		sess:  -mReq.sess,
 		trace: mReq.trace,
 	}
-	var cb func()
 
-	cb = func() {
-		if mRsp.sess != 0 {
+	if mc := ss.node.regOpt.MetricCollector; mc != nil {
+		mc.Counter("[ServiceRpc] "+ss.name, 1)
+
+		start := time.Now().UnixNano()
+		var cb func()
+		isRequest := mReq.sess != 0
+		if isRequest {
+			cb = func() {
+				// request
+				dur := time.Now().UnixNano() - start
+				mc.Histogram("[ServiceRequest] "+ss.name+"::"+funcName, float64(dur))
+			}
 		}
-	}
 
-	ctx := newRpcContext(ss, mRsp, mReq, cb)
-	if ss.delayedRpc == nil || ss.allowedRpc[funcName] {
-		ss.entry(ctx, funcName, mReq.getRequestFuncArgs)
+		ctx := newRpcContext(ss, mRsp, mReq.sess, mReq.src, mReq.nAddr, mReq.cb, cb)
+		if ss.delayedRpc == nil || ss.allowedRpc[funcName] {
+			ss.entry(ctx, funcName, mReq.getRequestFuncArgs)
+		} else {
+			ss.delayEntry(ctx, funcName, mReq.getRequestFuncArgs)
+		}
+
+		if !isRequest {
+			dur := time.Now().UnixNano() - start
+			mc.Histogram("[ServicePost] "+ss.name+"::"+funcName, float64(dur))
+		}
 	} else {
-		ss.delayEntry(ctx, funcName, mReq.getRequestFuncArgs)
+		ctx := newRpcContext(ss, mRsp, mReq.sess, mReq.src, mReq.nAddr, mReq.cb, nil)
+		if ss.delayedRpc == nil || ss.allowedRpc[funcName] {
+			ss.entry(ctx, funcName, mReq.getRequestFuncArgs)
+		} else {
+			ss.delayEntry(ctx, funcName, mReq.getRequestFuncArgs)
+		}
 	}
 }
 
@@ -637,13 +631,95 @@ func (ss *Service) httpEntry(ctx *fasthttp.RequestCtx) {
 	if len(ss.httpForwardAddr) == 0 {
 		processHttpRpc(ss, ctx)
 	} else {
-		srv := nodeGetService(ss.httpForwardAddr[rand.Intn(len(ss.httpForwardAddr))])
+		srv := nodeGetService(ss.httpForwardAddr[rand.IntN(len(ss.httpForwardAddr))])
 		if srv == nil {
 			ctx.Error("invalid service address", http.StatusInternalServerError)
 			return
 		}
 
 		processHttpRpc(srv, ctx)
+	}
+}
+
+func (ss *Service) createProxy(updater *AddrUpdater, nAddr Addr, sAddr int32, name string) IProxy {
+	if nAddr.IsLocalhost() || nAddr == Config.CurNodeAddr {
+		nAddr = AddrLocal
+	}
+
+	var urlBase string
+	if len(name) > 0 {
+		regInfo, ok := ss.node.name2Info[name]
+		if !ok {
+			ss.Errorf("[createProxy] invalid service name %v", name)
+			return nil
+		}
+		sAddr = -regInfo.Kind
+
+		if updater == nil {
+			if nAddr == AddrLocal {
+				if !Config.CurNodeMap[name] {
+					ss.Errorf("[createProxy] cannot found local service name %v", name)
+					return nil
+				}
+			} else if nAddr == AddrInvalid && Config.CurNodeMap[name] {
+				// 自动查找且本地存在需要的服务
+				nAddr = AddrLocal
+			} else if nAddr == AddrInvalid || nAddr == AddrRemote {
+			loop:
+				for _, ni := range Config.Nodes {
+					if ni.Name == Config.CurNodeName {
+						continue
+					}
+
+					for _, n := range ni.Services {
+						if n == name && len(ni.Host) > 0 {
+							// 远端节点的服务，优先使用 Http
+							if ni.HttpPort > 0 {
+								protocol := "http"
+								if ni.UseHttps {
+									protocol = "https"
+								}
+								urlBase = fmt.Sprintf("%v://%s:%v", protocol, ni.Host, ni.HttpPort)
+								break loop
+							} else if ni.Port > 0 {
+								nAddr = ni.NodeAddr
+								break loop
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(urlBase) > 0 {
+		// TODO by mogu: Golang HTTP2 有 bug，会导致超时访问，使用 HTTP1 可以绕过
+		tr := &http.Transport{}
+		tr.TLSClientConfig = &tls.Config{
+			NextProtos: []string{"h1"},
+		}
+
+		res, _ := url.JoinPath(urlBase, httpRpcPathPrefix, name)
+		return &httpProxy{
+			srv: ss,
+			url: res,
+			httpClient: &http.Client{
+				Timeout:   time.Second * 8,
+				Transport: tr,
+			},
+		}
+	}
+
+	if nAddr == AddrRemote || sAddr == 0 || (nAddr == AddrInvalid && updater == nil) {
+		ss.Errorf("[createProxy] invalid arguments nAddr: %v sAddr: %v name: %v", nAddr, sAddr, name)
+		return nil
+	}
+
+	return &serviceProxy{
+		srv:          ss,
+		nAddr:        nAddr,
+		nAddrUpdater: updater,
+		sAddr:        sAddr,
 	}
 }
 
@@ -707,6 +783,13 @@ func processHttpRpc(srv *Service, ctx *fasthttp.RequestCtx) {
 		}()
 
 		f.Call(rArgs)
+
+		for _, arg := range rArgs {
+			if arg.CanAddr() {
+				arg.SetZero()
+			}
+		}
+		rArgs = nil
 	})
 
 	if ch != nil {

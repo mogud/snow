@@ -3,28 +3,36 @@ package node
 var _ = (IRpcContext)((*rpcContext)(nil))
 
 type rpcContext struct {
+	reqSess     int32
+	reqSrc      int32
+	reqCb       func(m *message)
+	reqNodeAddr Addr
+
 	mRsp    *message
-	mReq    *message
 	srv     *Service
 	flushed bool
 	flushCb func()
 }
 
-func newRpcContext(srv *Service, mRsp, mReq *message, flushCb func()) *rpcContext {
+func newRpcContext(srv *Service, mRsp *message, reqSess, reqSrc int32, reqNodeAddr Addr, reqCb func(m *message), flushCb func()) *rpcContext {
 	return &rpcContext{
+		reqSess:     reqSess,
+		reqSrc:      reqSrc,
+		reqNodeAddr: reqNodeAddr,
+		reqCb:       reqCb,
+
 		mRsp:    mRsp,
-		mReq:    mReq,
 		srv:     srv,
 		flushCb: flushCb,
 	}
 }
 
 func (ss *rpcContext) GetRemoteNodeAddr() INodeAddr {
-	return ss.mReq.nAddr
+	return ss.reqNodeAddr
 }
 
 func (ss *rpcContext) GetRemoteServiceAddr() int32 {
-	return ss.mReq.src
+	return ss.reqSrc
 }
 
 func (ss *rpcContext) Catch(f func(error)) IRpcContext {
@@ -54,17 +62,21 @@ func (ss *rpcContext) flush() {
 		ss.flushCb()
 	}
 
-	mReq := ss.mReq
+	reqSess := ss.reqSess
+	reqSrc := ss.reqSrc
+	reqNodeAddr := ss.reqNodeAddr
+	reqCb := ss.reqCb
 	mRsp := ss.mRsp
-	if mReq.sess > 0 {
-		if mReq.cb != nil { // local service message
-			mReq.cb(mRsp)
-		} else if mReq.nAddr != 0 { // must be remote message
-			sender := nodeGetMessageSender(mReq.nAddr, mReq.src, false, nil)
+	if reqSess > 0 {
+		if reqCb != nil { // local service message
+			reqCb(mRsp)
+		} else if reqNodeAddr != 0 { // must be remote message
+			sender := nodeGetMessageSender(reqNodeAddr, reqSrc, false, nil)
 			if sender != nil {
 				sender.send(mRsp)
 			} else {
-				ss.srv.Errorf("service at nAddr(%v) sAddr(%#8x) not found when rpc return", mReq.nAddr, mReq.src)
+				ss.srv.Errorf("service at nAddr(%v) sAddr(%#8x) not found when rpc return", reqNodeAddr, reqSrc)
+				mRsp.clear()
 			}
 		} // else is a local post
 	}

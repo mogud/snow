@@ -7,6 +7,8 @@ import (
 
 var _ ILogger = (*DefaultLogger)(nil)
 
+var GlobalLogDataBuilder func(data *LogData)
+
 type DefaultLogger struct {
 	path           string
 	handler        ILogHandler
@@ -29,6 +31,9 @@ func (ss *DefaultLogger) log(level Level, format string, args ...any) {
 		Message: func() string {
 			return fmt.Sprintf(format, args...)
 		},
+	}
+	if GlobalLogDataBuilder != nil {
+		GlobalLogDataBuilder(logData)
 	}
 	if ss.logDataBuilder != nil {
 		ss.logDataBuilder(logData)

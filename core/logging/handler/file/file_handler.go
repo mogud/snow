@@ -27,6 +27,7 @@ type Option struct {
 	FileNameFormat             string                   `snow:"FileNameFormat"`
 	FileRollingMegabytes       int                      `snow:"FileRollingMegabytes"`
 	FileRollingIntervalSeconds int                      `snow:"FileRollingIntervalSeconds"`
+	Compress                   bool                     `snow:"Compress"`
 }
 
 type Handler struct {
@@ -58,9 +59,8 @@ func NewHandler() *Handler {
 		},
 		cacheFilterKeyMap: make(map[string]struct{}),
 		formatter:         logging.ColorLogFormatter,
-		logChan:           make(chan *writerElement, 102400),
+		logChan:           make(chan *writerElement),
 	}
-	handler.fileWriter = newWriter(handler.logChan)
 
 	for sPath := range handler.option.Filter {
 		handler.sortedFilterKeys = append(handler.sortedFilterKeys, sPath)
@@ -115,15 +115,16 @@ func (ss *Handler) CheckOption() {
 		ss.option.FileNameFormat = "%Y_%02M_%02D_%02h_%02m_%04i.log"
 	}
 
-	if ss.option.MaxLogChanLength != cap(ss.logChan) {
+	if ss.option.MaxLogChanLength != cap(ss.logChan) || ss.fileWriter == nil || ss.option.Compress != ss.fileWriter.compress {
 		close(ss.logChan)
 		ss.logChan = make(chan *writerElement, ss.option.MaxLogChanLength)
-		ss.fileWriter = newWriter(ss.logChan)
+		ss.fileWriter = newWriter(ss.logChan, ss.option.Compress)
 	}
 
 	if len(ss.option.LogPath) == 0 {
 		ss.option.LogPath = "logs"
 	}
+
 	if ss.option.DefaultLevel == logging.NONE {
 		ss.option.DefaultLevel = logging.INFO
 	}
@@ -258,7 +259,9 @@ func (ss *Handler) refreshFileName(now time.Time) string {
 			if len(ss.fileName) == 0 && len(indexFormatString) > 0 {
 				for {
 					if _, err := os.Stat(fullName); err != nil {
-						break
+						if _, err = os.Stat(fullName + ".zst"); err != nil {
+							break
+						}
 					}
 
 					ss.index++

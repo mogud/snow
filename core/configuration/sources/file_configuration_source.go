@@ -106,7 +106,7 @@ func (ss *FileConfigurationProvider) Load() {
 		if err != nil {
 			parentDir := path.Dir(ss.path)
 
-			log.Printf("file watcher watch not exist file(%v): %v, try to watch parent(%v)...", ss.path, err.Error(), parentDir)
+			log.Printf("file watcher cannot watch file(%v), try parent(%v)...", ss.path, parentDir)
 
 			err = os.MkdirAll(parentDir, os.ModeDir)
 			if err != nil {
@@ -129,7 +129,9 @@ func (ss *FileConfigurationProvider) loadFile() {
 
 	data, err := os.ReadFile(ss.path)
 	if err != nil {
-		fmt.Printf("read file error: %v\n", err.Error())
+		if !ss.optional {
+			fmt.Printf("read file error: %v\n", err.Error())
+		}
 		return
 	}
 

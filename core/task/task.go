@@ -20,5 +20,6 @@ func init() { // TODO
 }
 
 func Execute(f func()) {
+	//go f()
 	_ = p.Invoke(f)
 }

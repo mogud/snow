@@ -5,13 +5,8 @@ import (
 	"fmt"
 	"github.com/mogud/snow/core/task"
 	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttpadaptor"
 	"net"
 	"net/http"
-	"net/http/pprof"
-	"os"
-	"runtime/debug"
-	"runtime/trace"
 	"sort"
 	"strconv"
 	"time"
@@ -44,15 +39,15 @@ var Config = &nodeConfig{
 	CurNodeMap: map[string]bool{},
 }
 
-func (ss *Node) initOptions(opt *Option) {
-	if len(opt.LocalIP) == 0 {
+func (ss *Node) initOptions() {
+	if len(ss.nodeOpt.LocalIP) == 0 {
 		panic("node local ip address empty")
 	}
 
 	var curHost string
 	var curPort int
 	var curHttpPort int
-	for name, nc := range opt.Nodes {
+	for name, nc := range ss.nodeOpt.Nodes {
 		nAddr, err := NewNodeAddr(nc.Host, nc.Port)
 		if err != nil {
 			ss.logger.Fatalf("invalid node(%s) address: %+v", name, err)
@@ -72,7 +67,7 @@ func (ss *Node) initOptions(opt *Option) {
 		}
 		Config.Nodes = append(Config.Nodes, info)
 
-		if name == opt.BootName {
+		if name == ss.nodeOpt.BootName {
 			curHost = nc.Host
 			curPort = nc.Port
 			curHttpPort = nc.HttpPort
@@ -93,7 +88,7 @@ func (ss *Node) initOptions(opt *Option) {
 	})
 
 	if len(curHost) == 0 {
-		curHost = opt.LocalIP
+		curHost = ss.nodeOpt.LocalIP
 	}
 
 	var err error
@@ -125,17 +120,6 @@ func (ss *Node) postInitOptions() {
 
 	ss.handleRequestMethod("/", http.MethodPost, ss.notFound)
 
-	if ss.nodeOpt.HttpDebug {
-		ss.handleRequestMethod("/debug/pprof/", http.MethodGet, fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Index))
-		ss.handleRequestMethod("/debug/pprof/cmdline", http.MethodGet, fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Cmdline))
-		ss.handleRequestMethod("/debug/pprof/profile", http.MethodGet, fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Profile))
-		ss.handleRequestMethod("/debug/pprof/symbol", http.MethodGet, fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Symbol))
-		ss.handleRequestMethod("/debug/pprof/trace", http.MethodGet, fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Trace))
-		ss.handleRequestMethod("/debug/pprof/trace_start", http.MethodGet, ss.traceStart)
-		ss.handleRequestMethod("/debug/pprof/trace_stop", http.MethodGet, ss.traceStop)
-		ss.handleRequestMethod("/gc", http.MethodGet, ss.gc)
-	}
-
 	task.Execute(func() {
 		if err := srv.Serve(ss.httpListener); err != nil {
 			ss.logger.Infof("http listener stopped: %+v", err)
@@ -156,7 +140,7 @@ func (ss *Node) handler(ctx *fasthttp.RequestCtx) {
 	if h, ok := ss.httpHandlers[string(ctx.Path())]; ok {
 		h(ctx)
 	} else {
-		ss.logger.Errorf("invalid http request route: %v", http.StatusBadRequest)
+		ss.logger.Errorf("invalid http request route: %v", string(ctx.RequestURI()))
 	}
 }
 
@@ -172,32 +156,6 @@ func (ss *Node) handleRequestMethod(pattern string, method string, handler fasth
 
 		handler(ctx)
 	}
-}
-
-// 手动GC
-func (ss *Node) gc(ctx *fasthttp.RequestCtx) {
-	debug.FreeOSMemory()
-	_, _ = ctx.WriteString("force gc and free os memory executed")
-}
-
-// 运行trace
-func (ss *Node) traceStart(ctx *fasthttp.RequestCtx) {
-	f, err := os.Create("trace.out")
-	if err != nil {
-		panic(err)
-	}
-
-	err = trace.Start(f)
-	if err != nil {
-		panic(err)
-	}
-	_, _ = ctx.WriteString("Trace Start")
-}
-
-// 停止trace
-func (ss *Node) traceStop(ctx *fasthttp.RequestCtx) {
-	trace.Stop()
-	_, _ = ctx.WriteString("Trace Stop")
 }
 
 func (ss *Node) notFound(ctx *fasthttp.RequestCtx) {

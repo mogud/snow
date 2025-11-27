@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mogud/snow/core/ticker"
 	"github.com/valyala/fasthttp"
-	"io"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +28,10 @@ import (
 	"github.com/mogud/snow/core/option"
 	sync2 "github.com/mogud/snow/core/sync"
 	"github.com/mogud/snow/core/task"
+	_ "net/http/pprof"
 )
+
+const TickInterval = 5 * time.Millisecond
 
 type nodeElementOption struct {
 	Order    int      `snow:"Order"`    // 节点顺序，节点服务的查找按 Order 值从小到大依次进行
@@ -40,6 +44,9 @@ type nodeElementOption struct {
 
 type Option struct {
 	LocalIP              string                        `snow:"LocalIP"`              // 内网 ip，用于判断 RPC 连接是否是本地
+	ProfileListenHost    string                        `snow:"ProfileListenHost"`    // Profile 监听地址，为空表示不监听
+	ProfileListenMinPort int                           `snow:"ProfileListenMinPort"` // Profile 监听动态最小端口
+	ProfileListenMaxPort int                           `snow:"ProfileListenMaxPort"` // Profile 监听动态最大端口，包含；若使用固定端口，则应该与最小端口一致
 	HttpKeepAliveSeconds int                           `snow:"HttpKeepAliveSeconds"` // 节点 Http 服务保活时间
 	HttpTimeoutSeconds   int                           `snow:"HttpTimeoutSeconds"`   // 节点 Http 服务超时时间
 	HttpDebug            bool                          `snow:"HttpDebug"`            // 节点 Http 是否为调试模式
@@ -52,20 +59,47 @@ type RegisterOption struct {
 	ClientHandlePreprocessor net2.IPreprocessor
 	ServerHandlePreprocessor net2.IPreprocessor
 	PostInitializer          func()
+	MetricCollector          IMetricCollector
 }
 
 type ServiceRegisterInfo struct {
 	Kind int32
 	Name string
-	Type any
+	Type reflect.Type
+}
+
+type consService[T any] interface {
+	*T
+	iService
+}
+
+func CheckedServiceRegisterInfo[T any, U consService[T]](kind int32) *ServiceRegisterInfo {
+	ty := reflect.TypeFor[T]()
+	return &ServiceRegisterInfo{
+		Kind: kind,
+		Name: ty.Name(),
+		Type: reflect.PointerTo(ty),
+	}
+}
+
+func CheckedServiceRegisterInfoName[T any, U consService[T]](kind int32, name string) *ServiceRegisterInfo {
+	return &ServiceRegisterInfo{
+		Kind: kind,
+		Name: name,
+		Type: reflect.PointerTo(reflect.TypeFor[T]()),
+	}
+}
+
+func CheckedServiceNilPtr[T any, U consService[T]]() any {
+	return (*T)(nil)
 }
 
 var defaultHandlePreprocessor net2.IPreprocessor = &defaultHandlePreprocessorImpl{}
 
 type defaultHandlePreprocessorImpl struct{}
 
-func (d defaultHandlePreprocessorImpl) Process(conn net.Conn) (io.Reader, io.Writer, error) {
-	return conn, conn, nil
+func (d defaultHandlePreprocessorImpl) Process(_ net.Conn) error {
+	return nil
 }
 
 func AddNode(b host.IBuilder, registerFactory func() *RegisterOption) {
@@ -107,6 +141,14 @@ type Node struct {
 	ctx    context.Context
 	cancel func()
 
+	serviceTickerPool   *ticker.Pool
+	serviceTickerCtx    context.Context
+	serviceTickerCancel context.CancelFunc
+
+	remoteHandleTickerPool   *ticker.Pool
+	remoteHandleTickerCtx    context.Context
+	remoteHandleTickerCancel context.CancelFunc
+
 	closeWait *sync.WaitGroup
 }
 
@@ -139,6 +181,12 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt
 
 	ss.closeWait = &sync.WaitGroup{}
 
+	ss.serviceTickerCtx, ss.serviceTickerCancel = context.WithCancel(context.Background())
+	ss.serviceTickerPool = ticker.NewPool("node.service", ss.serviceTickerCtx, ss.closeWait, 1000, TickInterval)
+
+	ss.remoteHandleTickerCtx, ss.remoteHandleTickerCancel = context.WithCancel(context.Background())
+	ss.remoteHandleTickerPool = ticker.NewPool("node.remote.handle", ss.remoteHandleTickerCtx, ss.closeWait, 100, 10*time.Millisecond)
+
 	ss.logger = logger.Get(func(data *logging.LogData) {
 		data.Name = "Node"
 		data.ID = fmt.Sprintf("%X", unsafe.Pointer(ss))
@@ -170,26 +218,29 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt
 
 	for name, nc := range ss.nodeOpt.Nodes {
 		if name == ss.nodeOpt.BootName {
-			ss.logger.Infof("read => name: %v host: %v port: %v", ss.nodeOpt.BootName, nc.Host, nc.Port)
+			ss.logger.Infof("read config => boot name: %v host: %v port: %v", ss.nodeOpt.BootName, nc.Host, nc.Port)
 			break
 		}
 	}
 
 	srvInfos := ss.regOpt.ServiceRegisterInfos
 	for _, info := range srvInfos {
-		kind, srv, name := info.Kind, info.Type, info.Name
+		kind, st, name := info.Kind, info.Type, info.Name
 
 		// TODO by mogu: 检查 kind name 是否重复
-		// TODO by mogu: 检查类型是否有效
-
-		ss.kind2Info[kind] = info
-		ss.name2Info[name] = info
-
 		if _, ok := ss.proto[kind]; ok {
 			ss.logger.Errorf("service proto kind(%d) already registered", kind)
 			return
 		}
-		st := reflect.TypeOf(srv)
+		if old, ok := ss.name2Info[name]; ok {
+			ss.logger.Errorf("service named (%s) already registered, (old kind: %d)", name, old.Kind)
+			return
+		}
+
+		// not used
+		ss.kind2Info[kind] = info
+		ss.name2Info[name] = info
+
 		if st == nil {
 			continue
 		}
@@ -221,15 +272,29 @@ func (ss *Node) Construct(host host.IHost, logger *logging.Logger[Node], nodeOpt
 func (ss *Node) Start(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	wg.Add(1)
 
-	ss.initOptions(ss.nodeOpt)
+	ss.initOptions()
 
 	if ss.regOpt.PostInitializer != nil {
 		ss.regOpt.PostInitializer()
 	}
 
+	ss.startProfileInterface()
+
+	ss.serviceTickerPool.Start(func(item ticker.PoolItem) {
+		srv := item.(*Service)
+		srv.onTick()
+	}, func(item ticker.PoolItem) {
+		srv := item.(*Service)
+		srv.onTickStop()
+	})
+	ss.remoteHandleTickerPool.Start(func(item ticker.PoolItem) {
+		h := item.(*remoteHandle)
+		h.onTick()
+	}, nil)
+
 	var services []*container.Pair[string, int32]
 	for _, sn := range Config.CurNodeServices {
-		sAddr, err := newService(sn, 204800)
+		sAddr, err := newService(sn)
 		if err != nil {
 			ss.logger.Fatalf("create service(%s) error: %+v", sn, err)
 		}
@@ -262,6 +327,40 @@ func (ss *Node) Start(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	task.Execute(ss.nodeStartListen)
 }
 
+func (ss *Node) startProfileInterface() {
+	if len(ss.nodeOpt.ProfileListenHost) > 0 {
+		minPort := ss.nodeOpt.ProfileListenMinPort
+		maxPort := ss.nodeOpt.ProfileListenMaxPort
+		listenHost := ss.nodeOpt.ProfileListenHost
+		task.Execute(func() {
+			var addr string
+			var err error
+			var listener net.Listener
+			port := minPort
+			for ; port <= maxPort; port++ {
+				addr = fmt.Sprintf("%v:%v", listenHost, port)
+				config := &net.ListenConfig{}
+				listener, err = config.Listen(ss.ctx, "tcp", addr)
+				if err == nil {
+					break
+				}
+			}
+
+			http.HandleFunc("/debug/gc", func(writer http.ResponseWriter, request *http.Request) {
+				runtime.GC()
+			})
+
+			if err == nil {
+				ss.logger.Infof("profile listen at %v", addr)
+				server := &http.Server{Addr: addr, Handler: http.DefaultServeMux}
+				_ = server.Serve(listener)
+			} else {
+				ss.logger.Errorf("profile listen error: %+v", err)
+			}
+		})
+	}
+}
+
 func (ss *Node) Stop(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 	wg.Add(1)
 	ss.cancel()
@@ -279,96 +378,20 @@ func (ss *Node) Stop(ctx context.Context, wg *sync2.TimeoutWaitGroup) {
 		}
 	}
 
-	_ = gNode.tcpListener.Close()
-	_ = gNode.httpListener.Close()
+	_ = ss.tcpListener.Close()
+	_ = ss.httpListener.Close()
 
-	gNode.Lock()
-	for _, h := range gNode.handle {
+	ss.Lock()
+	for _, h := range ss.handle {
 		h.cancel()
 	}
-	gNode.Unlock()
+	ss.Unlock()
 
-	gNode.closeWait.Wait()
+	ss.serviceTickerCancel()
+	ss.remoteHandleTickerCancel()
+	ss.closeWait.Wait()
 
 	wg.Done()
-}
-
-var gNode *Node
-
-func NewService(name string) (int32, error) {
-	return newService(name, 8192)
-}
-
-func newService(name string, chanSize int) (int32, error) {
-	info := gNode.name2Info[name]
-	if info == nil {
-		return 0, fmt.Errorf("service proto kind(%s) is not registered", name)
-	}
-
-	kind := info.Kind
-
-	gNode.Lock()
-	defer gNode.Unlock()
-
-	pt := gNode.proto[kind]
-	gNode.sAddr++
-
-	nsi := reflect.New(pt.Elem()).Interface()
-	nss := nsi.(iService)
-	ns := nss.getService()
-	ns.init(name, kind, gNode.sAddr, chanSize, nss, gNode.methodMap[kind], gNode.httpMethodMap[kind])
-
-	host.Inject(gNode.nodeScope, nsi)
-
-	ns.afterInject()
-
-	gNode.services[gNode.sAddr] = ns
-	gNode.services[-kind] = ns
-	return gNode.sAddr, nil
-}
-
-// StartService 快速启动一个服务，保证异步调用到 Service 的 Start，由用户保证完整、正确启动
-func StartService(sAddr int32, arg any) bool {
-	gNode.Lock()
-	defer gNode.Unlock()
-
-	srv := gNode.services[sAddr]
-	if srv == nil {
-		return false
-	}
-
-	srv.start(arg)
-
-	return true
-}
-
-// StopService 关闭一个服务，阻塞执行
-func StopService(sAddr int32) bool {
-	gNode.Lock()
-	srv := gNode.services[sAddr]
-	if srv == nil {
-		gNode.Unlock()
-		return false
-	}
-
-	delete(gNode.services, srv.GetAddr())
-	gNode.Unlock()
-
-	srv.stop()
-
-	return true
-}
-
-func nodeGenSessionID() int32 {
-	atomic.CompareAndSwapInt32(&gNode.sessID, math.MaxInt32, 0) // 保证+1之后不会出现负数。否则rpc会一直有问题
-	return atomic.AddInt32(&gNode.sessID, 1)
-}
-
-func nodeGetService(sAddr int32) *Service {
-	gNode.Lock()
-	defer gNode.Unlock()
-
-	return gNode.services[sAddr]
 }
 
 func (ss *Node) nodeStartListen() {
@@ -437,6 +460,84 @@ func (ss *Node) nodeAddRemoteHandle(nAddr Addr, h *remoteHandle) {
 	gNode.handle[nAddr] = h
 }
 
+var gNode *Node
+
+func NewService(name string) (int32, error) {
+	return newService(name)
+}
+
+func newService(name string) (int32, error) {
+	info := gNode.name2Info[name]
+	if info == nil {
+		return 0, fmt.Errorf("service proto kind(%s) is not registered", name)
+	}
+
+	kind := info.Kind
+
+	gNode.Lock()
+	defer gNode.Unlock()
+
+	pt := gNode.proto[kind]
+	gNode.sAddr++
+
+	nsi := reflect.New(pt.Elem()).Interface()
+	nss := nsi.(iService)
+	ns := nss.getService()
+	ns.init(gNode, name, kind, gNode.sAddr, nss, gNode.methodMap[kind], gNode.httpMethodMap[kind])
+
+	host.Inject(gNode.nodeScope, nsi)
+
+	ns.afterInject()
+
+	gNode.services[gNode.sAddr] = ns
+	gNode.services[-kind] = ns
+	return gNode.sAddr, nil
+}
+
+// StartService 快速启动一个服务，保证异步调用到 Service 的 Start，由用户保证完整、正确启动
+func StartService(sAddr int32, arg any) bool {
+	gNode.Lock()
+	defer gNode.Unlock()
+
+	srv := gNode.services[sAddr]
+	if srv == nil {
+		return false
+	}
+
+	srv.start(arg)
+
+	return true
+}
+
+// StopService 关闭一个服务，阻塞执行
+func StopService(sAddr int32) bool {
+	gNode.Lock()
+	srv := gNode.services[sAddr]
+	if srv == nil {
+		gNode.Unlock()
+		return false
+	}
+
+	delete(gNode.services, srv.GetAddr())
+	gNode.Unlock()
+
+	srv.stop()
+
+	return true
+}
+
+func nodeGenSessionID() int32 {
+	atomic.CompareAndSwapInt32(&gNode.sessID, math.MaxInt32, 0) // 保证+1之后不会出现负数。否则rpc会一直有问题
+	return atomic.AddInt32(&gNode.sessID, 1)
+}
+
+func nodeGetService(sAddr int32) *Service {
+	gNode.Lock()
+	defer gNode.Unlock()
+
+	return gNode.services[sAddr]
+}
+
 func nodeDelRemoteHandle(nAddr Addr) {
 	gNode.Lock()
 	defer gNode.Unlock()
@@ -445,6 +546,10 @@ func nodeDelRemoteHandle(nAddr Addr) {
 }
 
 func nodeGetMessageSender(nAddr Addr, sAddr int32, retry bool, retrySigChan chan<- bool) iMessageSender {
+	if nAddr == AddrInvalid && retry && retrySigChan != nil {
+		retrySigChan <- true
+	}
+
 	gNode.Lock()
 	defer gNode.Unlock()
 
@@ -465,7 +570,7 @@ func nodeGetMessageSender(nAddr Addr, sAddr int32, retry bool, retrySigChan chan
 	gNode.handle[nAddr] = h
 
 	task.Execute(func() {
-		slog.Infof("node conntect to %v...", nAddr)
+		slog.Infof("node connect to %v...", nAddr)
 		conn, err := net.Dial("tcp4", nAddr.String())
 		if err != nil {
 			slog.Warnf("node get remote handle failed: %+v", err)
@@ -478,7 +583,7 @@ func nodeGetMessageSender(nAddr Addr, sAddr int32, retry bool, retrySigChan chan
 
 		h.conn = conn
 
-		if h.r, h.w, err = gNode.chPreprocessor.Process(conn); err != nil {
+		if err = gNode.chPreprocessor.Process(conn); err != nil {
 			slog.Warnf("send identity to server(%v) failed: %v", nAddr, err)
 			h.safeDelete()
 			_ = conn.Close()
@@ -487,7 +592,7 @@ func nodeGetMessageSender(nAddr Addr, sAddr int32, retry bool, retrySigChan chan
 
 		gNode.closeWait.Add(1)
 		defer gNode.closeWait.Done()
-		slog.Infof("node conntect to %v sucess", nAddr)
+		slog.Infof("node connect to %v sucess", nAddr)
 		h.startClient()
 	})
 	return h

@@ -10,12 +10,14 @@ import (
 	"github.com/mogud/snow/core/ticker"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-var _ = iMessageSender((*remoteHandle)(nil))
+var _ iMessageSender = (*remoteHandle)(nil)
+var _ ticker.PoolItem = (*remoteHandle)(nil)
 
 var ErrRemoteDisconnected = fmt.Errorf("remote disconnected")
 
@@ -28,23 +30,23 @@ type session struct {
 type remoteHandle struct {
 	node   *Node
 	conn   net.Conn
-	w      io.Writer
-	r      io.Reader
 	nAddr  Addr
 	status int32
 	ctx    context.Context
 	cancel func()
 
-	timeout int
-	sessCb  sync.Map // [request_code int]*session;
-	wBuf    chan *message
-	wg      sync.WaitGroup
+	timeout           int
+	lastSessCheckTime time.Time
+	sessCb            sync.Map // [request_code int]*session;
+	wBuf              chan []byte
+	wBufferLock       sync.Mutex
+	wBuffer           []*message
+	wg                sync.WaitGroup
 }
 
 func newServerHandle(node *Node, nAddr Addr, conn net.Conn) *remoteHandle {
 	ss := newRemoteHandle(node, nAddr, conn)
-	var err error
-	if ss.r, ss.w, err = node.shPreprocessor.Process(conn); err != nil {
+	if err := node.shPreprocessor.Process(conn); err != nil {
 		slog.Debugf("illegal remote(%s) connection: %v", conn.RemoteAddr().String(), err)
 		_ = conn.Close()
 	}
@@ -59,25 +61,40 @@ func newRemoteHandle(node *Node, nAddr Addr, conn net.Conn) *remoteHandle {
 		conn:   conn,
 		nAddr:  nAddr,
 		status: 0,
-		wBuf:   make(chan *message, 1024*1024),
+		wBuf:   make(chan []byte, 4*1024),
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	return h
+}
+
+func (ss *remoteHandle) Paused() bool {
+	return false
+}
+
+func (ss *remoteHandle) Closed() bool {
+	return ss.closed()
 }
 
 func (ss *remoteHandle) send(m *message) bool {
 	if ss.closed() {
 		slog.Debugf("remote handle(%v) closed", ss.nAddr)
 
-		if m.cb != nil {
-			em := &message{
-				trace: m.trace,
-				err:   ErrRemoteDisconnected,
+		// 关闭时，若有回调，则立即调用
+		if m != nil {
+			if m.cb != nil {
+				em := &message{
+					trace: m.trace,
+					err:   ErrRemoteDisconnected,
+				}
+				m.cb(em)
 			}
-			m.cb(em)
+			m.clear()
 		}
+
+		return false
 	}
 
+	// 若是请求，则设置超时回调
 	if m != nil && m.sess > 0 {
 		s := &session{
 			cb:    m.cb,
@@ -92,31 +109,15 @@ func (ss *remoteHandle) send(m *message) bool {
 			slog.Debugf("remote handle(%v) closed, close all sessions", ss.nAddr)
 
 			ss.closeAllSession()
+			return true
 		}
 	}
 
-	select {
-	case ss.wBuf <- m:
-		return true
-	default:
-		if m == nil {
-			// ping 消息
-			return false
-		}
+	ss.wBufferLock.Lock()
+	defer ss.wBufferLock.Unlock()
 
-		slog.Warnf("remote handle(%v) message chan full", ss.nAddr)
-
-		ss.sessCb.Delete(m.sess)
-
-		if m.cb != nil {
-			em := &message{
-				trace: m.trace,
-				err:   ErrNodeMessageChanFull,
-			}
-			m.cb(em)
-		}
-		return true
-	}
+	ss.wBuffer = append(ss.wBuffer, m)
+	return true
 }
 
 func (ss *remoteHandle) startClient() {
@@ -128,13 +129,15 @@ func (ss *remoteHandle) startServer() {
 }
 
 func (ss *remoteHandle) start(isReceiver bool) {
-	ss.wg.Add(3)
+	ss.node.remoteHandleTickerPool.Add(ss)
 
-	task.Execute(ss.clearSession)
+	ss.wg.Add(2)
 	task.Execute(ss.doSend)
 	task.Execute(func() { ss.doReceive(isReceiver) })
 
 	ss.wg.Wait()
+
+	_ = ss.conn.Close()
 
 	ss.safeDelete()
 }
@@ -150,42 +153,6 @@ func (ss *remoteHandle) closed() bool {
 	return atomic.LoadInt32(&ss.status) == 1
 }
 
-func (ss *remoteHandle) clearSession() {
-	ch := make(chan int64, 1024)
-	ticker.Subscribe(-int64(ss.nAddr), ch)
-	prev := time.Now()
-loop:
-	for {
-		select {
-		case <-ss.ctx.Done():
-			break loop
-		case unixNano := <-ch:
-			now := time.Unix(0, unixNano)
-			if now.Sub(prev) < 10*time.Second {
-				continue
-			}
-			prev = now
-
-			zero := time.Time{}
-			ss.sessCb.Range(func(key, value any) bool {
-				v := value.(*session)
-				if !v.timeout.Equal(zero) && v.timeout.Before(now) {
-					ss.sessCb.Delete(key)
-
-					m := &message{
-						trace: v.trace,
-						err:   ErrRequestTimeoutRemote,
-					}
-					v.cb(m)
-				}
-				return true
-			})
-		}
-	}
-	ticker.Unsubscribe(-int64(ss.nAddr))
-	ss.wg.Done()
-}
-
 func (ss *remoteHandle) closeAllSession() {
 	ss.sessCb.Range(func(key, _ any) bool {
 		value, ok := ss.sessCb.LoadAndDelete(key)
@@ -196,89 +163,141 @@ func (ss *remoteHandle) closeAllSession() {
 				trace: v.trace,
 			}
 			v.cb(m)
+			v.cb = nil
 		}
 
 		return true
 	})
 }
 
+func (ss *remoteHandle) onTick() {
+	zero := time.Time{}
+	now := time.Now()
+
+	if now.Sub(ss.lastSessCheckTime) > 10*time.Second {
+		ss.lastSessCheckTime = now
+
+		ss.sessCb.Range(func(key, value any) bool {
+			v := value.(*session)
+			if !v.timeout.Equal(zero) && v.timeout.Before(now) {
+				ss.sessCb.Delete(key)
+
+				m := &message{
+					trace: v.trace,
+					err:   ErrRequestTimeoutRemote,
+				}
+				v.cb(m)
+			}
+			return true
+		})
+	}
+
+	ss.wBufferLock.Lock()
+	msgList := ss.wBuffer
+	ss.wBuffer = nil
+	ss.wBufferLock.Unlock()
+
+	if len(msgList) > 0 {
+		buffer := make([]byte, 0, 4*1024)
+		for _, m := range msgList {
+			bs, err := m.marshal()
+			if m != nil {
+				m.clear()
+			}
+			if err != nil {
+				slog.Errorf("message marshal %v", err.Error())
+				return
+			}
+			buffer = append(buffer, bs...)
+		}
+
+		select {
+		case ss.wBuf <- buffer:
+		default:
+			slog.Fatalf("write to remote(%v) while channel full", ss.nAddr)
+			return
+		}
+	}
+}
+
 func (ss *remoteHandle) doSend() {
-loop:
+	defer func() {
+		ss.cancel()
+		ss.wg.Done()
+	}()
+
 	for {
 		select {
 		case <-ss.ctx.Done():
-			break loop
-		case m, ok := <-ss.wBuf:
-			bs, err := m.marshal()
-			if err != nil {
-				slog.Errorf("message marshal %v", err.Error())
-				break
+			return
+		case bs := <-ss.wBuf:
+			n, err := ss.conn.Write(bs)
+			select {
+			case <-ss.ctx.Done():
+				return
+			default:
 			}
 
-			if !ok {
-				break loop
-			}
-			n, err := ss.conn.Write(bs)
 			if err != nil {
-				slog.Errorf("write to %v error: %+v", ss.nAddr, err)
-				break loop
+				slog.Errorf("write to remote(%v) error: %+v", ss.nAddr, err)
+				return
 			}
 			if n != len(bs) {
-				slog.Errorf("write to %v error: length not match", ss.nAddr)
-				break loop
+				slog.Errorf("write to remote(%v) error: length not match", ss.nAddr)
+				return
 			}
 		}
 	}
-	_ = ss.conn.Close()
-	ss.cancel()
-	ss.wg.Done()
 }
 
 func (ss *remoteHandle) doReceive(isReceiver bool) {
 	var data []byte
-	buf := make([]byte, 256)
+	buf := make([]byte, 4*1024)
 	c := ss.conn
 
-loop:
+	defer func() {
+		ss.cancel()
+		ss.wg.Done()
+	}()
+
 	for {
 		_ = c.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, err := c.Read(buf)
-
-		var e net.Error
-		switch {
-		case errors.As(err, &e) && e.Timeout():
-			if isReceiver {
-				if ss.timeout > 9 {
-					// 发送 ping 消息
-					ss.send((*message)(nil))
-					ss.timeout = 0
-				} else {
-					ss.timeout++
-				}
-			}
-			continue
-		case errors.Is(err, net.ErrClosed):
-			slog.Debugf("remote(%v) connection closed", ss.nAddr)
-			break loop
-		case err != nil:
-			slog.Warnf("receive remote(%v) message failed: %v", ss.nAddr, err)
-			break loop
-		}
-
 		select {
 		case <-ss.ctx.Done():
-			break loop
+			return
 		default:
+		}
+
+		if err != nil {
+			var opErr *net.OpError
+			if errors.As(err, &opErr) && opErr.Timeout() {
+				if isReceiver {
+					if ss.timeout > 9 {
+						// 发送 ping 消息
+						ss.send((*message)(nil))
+						ss.timeout = 0
+					} else {
+						ss.timeout++
+					}
+				}
+				continue
+			} else if errors.Is(err, io.EOF) {
+				slog.Debugf("read from remote(%v) while remote closed the connection", ss.nAddr)
+			} else if errors.As(err, &opErr) && strings.Contains(opErr.Err.Error(), "forcibly closed by the remote host") {
+				slog.Debugf("read from remote(%v) while remote forcibly closed the connection", ss.nAddr)
+			} else {
+				slog.Errorf("read from remote(%v) while connection lost, err: %v", ss.nAddr, err)
+			}
+			return
 		}
 
 		data = append(data, buf[:n]...)
 		data = ss.doDivide(data)
 		if data == nil {
-			break
+			return
 		}
 	}
-	ss.cancel()
-	ss.wg.Done()
 }
 
 func (ss *remoteHandle) doDivide(data []byte) []byte {
@@ -294,7 +313,8 @@ func (ss *remoteHandle) doDivide(data []byte) []byte {
 		if len(data) < msgLen {
 			break
 		}
-		msg := data[:msgLen]
+		msg := make([]byte, msgLen)
+		copy(msg, data)
 
 		m := &message{}
 		if err := m.unmarshal(msg); err != nil {
@@ -323,9 +343,12 @@ func (ss *remoteHandle) doDispatch(m *message) {
 		if ok {
 			ss.sessCb.Delete(-m.sess)
 
-			scb.(*session).cb(m)
+			cbSess := scb.(*session)
+			cbSess.cb(m)
+			cbSess.cb = nil
 		} else {
 			slog.Errorf("no session(%v) callback found, message data: %+v", -m.sess, m)
+			m.clear()
 		}
 		return
 	}
@@ -334,6 +357,7 @@ func (ss *remoteHandle) doDispatch(m *message) {
 		// error occurs
 
 		slog.Warnf("remote error, code: %+v", m.getError())
+		m.clear()
 		return
 	}
 
@@ -352,5 +376,6 @@ func (ss *remoteHandle) doDispatch(m *message) {
 			err:   fmt.Errorf("invalid address"),
 		}
 		ss.send(mm)
+		m.clear()
 	}
 }
