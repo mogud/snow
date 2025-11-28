@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/mogud/snow/core/ticker"
-	"github.com/valyala/fasthttp"
 	"math"
 	"net"
 	"net/http"
@@ -18,6 +16,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/mogud/snow/core/ticker"
+	"github.com/valyala/fasthttp"
+
+	_ "net/http/pprof"
+
 	"github.com/mogud/snow/core/container"
 	"github.com/mogud/snow/core/host"
 	"github.com/mogud/snow/core/injection"
@@ -28,12 +31,11 @@ import (
 	"github.com/mogud/snow/core/option"
 	sync2 "github.com/mogud/snow/core/sync"
 	"github.com/mogud/snow/core/task"
-	_ "net/http/pprof"
 )
 
 const TickInterval = 5 * time.Millisecond
 
-type nodeElementOption struct {
+type ElementOption struct {
 	Order    int      `snow:"Order"`    // 节点顺序，节点服务的查找按 Order 值从小到大依次进行
 	Host     string   `snow:"Host"`     // 节点主机名，可以是 IP，若当前节点的 Host 为空，则节点 Tcp 监听 LocalIP
 	Port     int      `snow:"Port"`     // 节点 Tcp 端口
@@ -43,15 +45,15 @@ type nodeElementOption struct {
 }
 
 type Option struct {
-	LocalIP              string                        `snow:"LocalIP"`              // 内网 ip，用于判断 RPC 连接是否是本地
-	ProfileListenHost    string                        `snow:"ProfileListenHost"`    // Profile 监听地址，为空表示不监听
-	ProfileListenMinPort int                           `snow:"ProfileListenMinPort"` // Profile 监听动态最小端口
-	ProfileListenMaxPort int                           `snow:"ProfileListenMaxPort"` // Profile 监听动态最大端口，包含；若使用固定端口，则应该与最小端口一致
-	HttpKeepAliveSeconds int                           `snow:"HttpKeepAliveSeconds"` // 节点 Http 服务保活时间
-	HttpTimeoutSeconds   int                           `snow:"HttpTimeoutSeconds"`   // 节点 Http 服务超时时间
-	HttpDebug            bool                          `snow:"HttpDebug"`            // 节点 Http 是否为调试模式
-	BootName             string                        `snow:"BootName"`             // 启动节点名
-	Nodes                map[string]*nodeElementOption `snow:"Nodes"`                // 当前关注的节点信息
+	LocalIP              string                    `snow:"LocalIP"`              // 内网 ip，用于判断 RPC 连接是否是本地
+	ProfileListenHost    string                    `snow:"ProfileListenHost"`    // Profile 监听地址，为空表示不监听
+	ProfileListenMinPort int                       `snow:"ProfileListenMinPort"` // Profile 监听动态最小端口
+	ProfileListenMaxPort int                       `snow:"ProfileListenMaxPort"` // Profile 监听动态最大端口，包含；若使用固定端口，则应该与最小端口一致
+	HttpKeepAliveSeconds int                       `snow:"HttpKeepAliveSeconds"` // 节点 Http 服务保活时间
+	HttpTimeoutSeconds   int                       `snow:"HttpTimeoutSeconds"`   // 节点 Http 服务超时时间
+	HttpDebug            bool                      `snow:"HttpDebug"`            // 节点 Http 是否为调试模式
+	BootName             string                    `snow:"BootName"`             // 启动节点名
+	Nodes                map[string]*ElementOption `snow:"Nodes"`                // 当前关注的节点信息
 }
 
 type RegisterOption struct {

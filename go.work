@@ -2,5 +2,6 @@ go 1.24.0
 
 use (
 	.
-	examples/minimal
+	./examples/minimal
+	./examples/pingpong
 )
