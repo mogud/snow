@@ -2,13 +2,13 @@ package ticker
 
 import (
 	"context"
-	"github.com/mogud/snow/core/task"
 	"math"
 	"runtime"
-	"server/lib/uid"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mogud/snow/core/task"
 )
 
 type PoolItem interface {
@@ -40,14 +40,12 @@ func (ss *Pool) Start(tickCallback func(item PoolItem), stopCallback func(item P
 
 	workerSize := runtime.NumCPU()
 	type tickWorker struct {
-		id    uid.Uid
 		count atomic.Int32
 		ch    chan PoolItem
 	}
 	workerMap := make([]*tickWorker, workerSize)
 	for i := 0; i < workerSize; i++ {
 		workerMap[i] = &tickWorker{
-			id: uid.Gen(),
 			ch: make(chan PoolItem, 100),
 		}
 	}
